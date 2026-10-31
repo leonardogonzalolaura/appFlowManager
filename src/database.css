@@ -1,0 +1,364 @@
+/* ==========================================================================
+   FlowManager — Fase 6: conexiones y scripts de base de datos
+   ========================================================================== */
+
+.database-view,
+.db-scripts,
+.db-execute {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.database-toolbar,
+.db-scripts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.database-toolbar strong,
+.db-scripts-toolbar strong {
+  font-size: 16px;
+}
+
+.database-toolbar span,
+.db-scripts-toolbar span {
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+.database-list,
+.db-script-list,
+.db-results {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.database-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.database-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.database-card-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.database-card-head small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.database-card-head > code {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.database-title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.database-title-row strong {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.database-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.database-card-actions,
+.db-scripts-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.database-remove,
+.db-remove {
+  color: var(--red);
+}
+
+.db-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.db-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.db-form-grid-host {
+  grid-template-columns: minmax(0, 1fr) 92px minmax(0, 1.2fr);
+}
+
+.db-port-field input {
+  text-align: right;
+}
+
+.db-file-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.db-file-row .input {
+  flex: 1;
+}
+
+.db-sql-editor {
+  min-height: 280px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.db-empty-scripts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 28px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.db-empty-scripts strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.db-empty-scripts span {
+  font-size: 9.5px;
+}
+
+.db-script-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.db-script-row.is-inactive {
+  opacity: 0.6;
+}
+
+.db-sequence {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+}
+
+.db-script-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.db-script-copy strong {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-script-copy small {
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.db-script-copy code {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.db-script-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.db-connection-preview {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+
+.db-execute-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.db-execute-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius-xs);
+}
+
+.db-execute-item:hover {
+  background: var(--bg-hover);
+}
+
+.db-execute-item > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.db-execute-item strong {
+  font-size: 9.5px;
+}
+
+.db-execute-item small {
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.db-execute-item code {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.db-result {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.db-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-result-head strong {
+  flex: 1;
+  font-size: 10px;
+}
+
+.db-result-head span {
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.db-result pre {
+  max-height: 150px;
+  overflow: auto;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  background: #090910;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.db-result pre.db-result-error {
+  color: var(--red);
+}
+
+.db-result small {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.db-execution-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.db-execution-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 2px;
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.db-execution-row > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-execution-row small {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+@media (max-width: 760px) {
+  .db-form-grid,
+  .db-form-grid-host {
+    grid-template-columns: 1fr;
+  }
+}

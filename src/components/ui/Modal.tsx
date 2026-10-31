@@ -30,8 +30,13 @@ export function Modal({
   className = '',
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
   const descriptionId = useId();
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -40,11 +45,13 @@ export function Modal({
 
     const dialog = dialogRef.current;
     dialog?.focus();
+    const body = dialog?.querySelector<HTMLElement>('.modal-body');
+    if (body) body.scrollTop = 0;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab' || !dialog) return;
@@ -74,7 +81,7 @@ export function Modal({
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div

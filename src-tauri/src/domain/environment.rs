@@ -12,13 +12,6 @@ pub enum Environment {
 
 #[cfg(test)]
 impl Environment {
-    pub const ALL: [Environment; 4] = [
-        Environment::Dev,
-        Environment::Qas,
-        Environment::Uat,
-        Environment::Prd,
-    ];
-
     pub fn as_str(self) -> &'static str {
         match self {
             Environment::Dev => "dev",

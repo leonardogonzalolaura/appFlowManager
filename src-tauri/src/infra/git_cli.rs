@@ -104,6 +104,20 @@ pub fn fetch(repo_path: &Path, remote: &str) -> Result<GitRun, AppError> {
     )
 }
 
+/// Actualiza solo la rama base remota antes de crear una rama nueva.
+pub fn fetch_base(repo_path: &Path, remote: &str, base_branch: &str) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "fetch".to_string(),
+            "--prune".to_string(),
+            remote.to_string(),
+            base_branch.to_string(),
+        ],
+        Duration::from_secs(120),
+    )
+}
+
 pub fn clone(url: &str, target: &Path) -> Result<GitRun, AppError> {
     validate_clone_url(url)?;
     run_git(
@@ -163,6 +177,181 @@ pub fn sanitize_folder_name(name: &str) -> Result<String, AppError> {
         ));
     }
     Ok(name.to_string())
+}
+
+pub fn validate_branch_name(name: &str) -> Result<(), AppError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Validation(
+            "El nombre de la rama es obligatorio.".into(),
+        ));
+    }
+    let run = run_git(
+        None,
+        &[
+            "check-ref-format".to_string(),
+            "--branch".to_string(),
+            name.to_string(),
+        ],
+        Duration::from_secs(10),
+    )?;
+    if !run.success {
+        return Err(AppError::Validation(format!(
+            "'{name}' no es un nombre de rama válido para Git."
+        )));
+    }
+    Ok(())
+}
+
+pub fn create_branch(
+    repo_path: &Path,
+    branch_name: &str,
+    start_ref: &str,
+) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "branch".to_string(),
+            branch_name.to_string(),
+            start_ref.to_string(),
+        ],
+        Duration::from_secs(60),
+    )
+}
+
+pub fn create_tracking_branch(
+    repo_path: &Path,
+    branch_name: &str,
+    remote_ref: &str,
+) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "branch".to_string(),
+            "--track".to_string(),
+            branch_name.to_string(),
+            remote_ref.to_string(),
+        ],
+        Duration::from_secs(60),
+    )
+}
+
+pub fn delete_local_branch(repo_path: &Path, branch_name: &str) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "branch".to_string(),
+            "-D".to_string(),
+            branch_name.to_string(),
+        ],
+        Duration::from_secs(30),
+    )
+}
+
+pub fn checkout_detached(repo_path: &Path, sha: &str) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "checkout".to_string(),
+            "--detach".to_string(),
+            sha.to_string(),
+        ],
+        Duration::from_secs(60),
+    )
+}
+
+pub fn create_branch_at(
+    repo_path: &Path,
+    branch_name: &str,
+    sha: &str,
+) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "branch".to_string(),
+            branch_name.to_string(),
+            sha.to_string(),
+        ],
+        Duration::from_secs(30),
+    )
+}
+
+pub fn update_branch_ref(
+    repo_path: &Path,
+    branch_name: &str,
+    new_sha: &str,
+    expected_sha: &str,
+) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "update-ref".to_string(),
+            format!("refs/heads/{branch_name}"),
+            new_sha.to_string(),
+            expected_sha.to_string(),
+        ],
+        Duration::from_secs(30),
+    )
+}
+
+pub fn remote_branch_sha(
+    repo_path: &Path,
+    remote: &str,
+    branch_name: &str,
+) -> Result<Option<String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "ls-remote".to_string(),
+            "--heads".to_string(),
+            remote.to_string(),
+            format!("refs/heads/{branch_name}"),
+        ],
+        Duration::from_secs(60),
+    )?;
+    if !run.success {
+        return Err(AppError::GitFailed(run.stderr));
+    }
+    Ok(run
+        .stdout
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .map(str::to_string))
+}
+
+pub fn push_branch(repo_path: &Path, remote: &str, branch_name: &str) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "push".to_string(),
+            "-u".to_string(),
+            remote.to_string(),
+            branch_name.to_string(),
+        ],
+        Duration::from_secs(180),
+    )
+}
+
+/// Empuja exactamente el commit preparado, aunque la rama local esté libre o
+/// haya sido abierta por otra herramienta. El nombre remoto se crea/actualiza
+/// solo si no existía con otro SHA (validado antes por deployment_push).
+pub fn push_branch_at(
+    repo_path: &Path,
+    remote: &str,
+    branch_name: &str,
+    sha: &str,
+) -> Result<GitRun, AppError> {
+    run_git(
+        Some(repo_path),
+        &[
+            "push".to_string(),
+            "-u".to_string(),
+            remote.to_string(),
+            format!("{sha}:refs/heads/{branch_name}"),
+        ],
+        Duration::from_secs(180),
+    )
 }
 
 pub fn invalidate_run(run: &GitRun, action: &str) -> AppError {

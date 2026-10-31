@@ -112,12 +112,12 @@ mod tests {
         let backups = dir.path().join("backups");
 
         let pool = connect(&db_path, &backups).await.expect("first connect");
-        assert_eq!(schema_version(&pool).await.expect("schema"), 3);
+        assert_eq!(schema_version(&pool).await.expect("schema"), 9);
         assert_eq!(count(&pool, Table::Repositories).await.expect("count"), 0);
         pool.close().await;
 
         let pool = connect(&db_path, &backups).await.expect("second connect");
-        assert_eq!(schema_version(&pool).await.expect("schema"), 3);
+        assert_eq!(schema_version(&pool).await.expect("schema"), 9);
         pool.close().await;
     }
 
@@ -241,6 +241,73 @@ mod tests {
         .execute(&pool)
         .await
         .expect("custom repo environment");
+
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn branch_naming_migration_renames_planned_branches() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("flowmanager.db");
+        let backups = dir.path().join("backups");
+        let pool = connect(&db_path, &backups).await.expect("connect");
+
+        sqlx::query(
+            "INSERT INTO repositories (id, name, local_path, created_at, updated_at)
+             VALUES ('repo-1', 'Demo', 'C:/demo', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .expect("repo");
+
+        for (key, type_) in [("BPIM-133", "User Story"), ("BPIM-900", "Bug")] {
+            sqlx::query(
+                "INSERT INTO requirements
+                   (id, external_key, source, title, type, first_seen_at, last_seen_at,
+                    is_active, manual_created, manual_locked, created_at, updated_at)
+                 VALUES (?1, ?1, 'monday', 'Demo', ?2, '2026-01-01T00:00:00Z',
+                         '2026-01-01T00:00:00Z', 1, 0, 0,
+                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(key)
+            .bind(type_)
+            .execute(&pool)
+            .await
+            .expect("requirement");
+
+            sqlx::query(
+                "INSERT INTO requirement_repositories
+                   (id, requirement_id, repository_id, branch_name, base_branch,
+                    branch_status, mapping_source, created_at, updated_at)
+                 VALUES (?1, ?1, 'repo-1', ?1, 'master', 'planned', 'manual',
+                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .bind(key)
+            .execute(&pool)
+            .await
+            .expect("mapping");
+        }
+
+        sqlx::raw_sql(include_str!("../migrations/0005_branch_naming.sql"))
+            .execute(&pool)
+            .await
+            .expect("migration 5");
+
+        let feature: String = sqlx::query_scalar(
+            "SELECT branch_name FROM requirement_repositories WHERE requirement_id = 'BPIM-133'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("feature branch");
+        assert_eq!(feature, "feature/BPIM-133");
+
+        let bug: String = sqlx::query_scalar(
+            "SELECT branch_name FROM requirement_repositories WHERE requirement_id = 'BPIM-900'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("fix branch");
+        assert_eq!(bug, "fix/BPIM-900");
 
         pool.close().await;
     }

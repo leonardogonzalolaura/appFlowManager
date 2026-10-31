@@ -1,0 +1,320 @@
+/* ==========================================================================
+   FlowManager · Fase 4: squash y conflictos
+   ========================================================================== */
+
+.req-action-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--red);
+  color: #0b0b12;
+  font-size: 8.5px;
+  font-weight: 700;
+}
+
+.squash-active-sessions {
+  padding: 9px 11px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.squash-session-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  margin-top: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.squash-session-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.squash-session-card > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.squash-session-card strong {
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.squash-session-card small {
+  color: var(--text-muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.squash-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.squash-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.squash-candidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.squash-candidate:hover {
+  background: var(--bg-hover);
+}
+
+.squash-candidate.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.squash-candidate.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.squash-candidate input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.squash-candidate-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.squash-candidate-title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.squash-candidate-title code {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 9.5px;
+}
+
+.squash-candidate-title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 10px;
+}
+
+.squash-candidate-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.squash-candidate-meta code {
+  font-size: 8.5px;
+}
+
+.squash-warning {
+  color: var(--yellow);
+}
+
+.squash-commits {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.squash-commit {
+  display: grid;
+  grid-template-columns: 16px 62px minmax(0, 1fr) minmax(110px, auto) auto;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 3px;
+  border-radius: var(--radius-xs);
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.squash-commit:hover {
+  background: var(--bg-hover);
+}
+
+.squash-commit input {
+  accent-color: var(--accent);
+}
+
+.squash-commit code {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.squash-commit > span:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.squash-commit-meta {
+  color: var(--text-muted);
+  font-size: 8.5px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.squash-session {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.squash-worktree-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.squash-worktree-cell code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.squash-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.squash-conflict-list {
+  max-height: 180px;
+}
+
+.squash-conflict-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 24px auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.squash-conflict-row > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.squash-conflict-empty {
+  padding: 14px 10px;
+  color: var(--green);
+  font-size: 10px;
+  text-align: center;
+}
+
+.squash-conflict-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.squash-abort-confirm {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--yellow);
+  font-size: 9.5px;
+}
+
+.squash-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.squash-ready > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.squash-ready code {
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+
+.squash-ready pre {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .squash-commit {
+    grid-template-columns: 16px 58px minmax(0, 1fr);
+  }
+
+  .squash-commit-meta {
+    grid-column: 3;
+    text-align: left;
+  }
+
+  .squash-abort-confirm {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+}

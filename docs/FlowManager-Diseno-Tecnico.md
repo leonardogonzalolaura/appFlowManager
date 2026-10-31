@@ -43,6 +43,10 @@ El merge de la rama hija hacia `dev/qas/uat/prd` se hace **manualmente en GitHub
 | D14 | Registro manual de requerimientos con `source = manual` | Permite cargar requerimientos que aún no están en Monday sin esperar el export; usa la misma entidad, lista y flujo de despliegue. |
 | D15 | Un requerimiento manual que luego aparece en Monday se **vincula con confirmación** | Evita duplicados y evita que el import sobrescriba datos locales sin permiso. |
 | D16 | Catálogo global de ambientes configurable; DEV/QAS/STAGE/UAT/PRD son los iniciales | Los equipos pueden agregar preprod, demo, sandbox u otros sin cambiar el código. STAGE se separó de QAS: `stage`/`staging` ya no se asocian a QAS. Cada repo resuelve su rama; todos los ambientes configurados quedan protegidos contra push. |
+| D17 | Si la rama del requerimiento ya existe en local, la app pregunta antes de tocarla | Se muestran sus commits y ahead/behind; el usuario elige conservarla o recrearla desde la base. Recrear elimina solo la rama local con confirmación y nunca sobrescribe una rama remota existente. |
+| D18 | Nombre de rama por tipo: `feature/<Task ID>` o `fix/<Task ID>` | Bugs y Hotfix usan `fix/`; User Story, Task y el resto usan `feature/`. Las ramas planificadas existentes se normalizan; las ramas ya creadas no se renombran. |
+| D19 | `git fetch --prune origin <base>` obligatorio antes de crear la rama | La rama nace de `origin/<base>` actualizado. Si el fetch falla, no se crea. No se borra ni se reescribe el `master` local. |
+| D20 | Squash en worktree aislado con conflictos resolubles | Se crea `flowmgr/squash/<id>` desde la base, se aplican `merge --squash` o `cherry-pick -n`, y ante conflicto la sesión se pausa. El usuario resuelve en VS Code, hace `git add` y continúa; abortar limpia solo el worktree. |
 
 ### Corrección explícita al requerimiento original
 
@@ -2821,12 +2825,42 @@ Al final de cada fase: demo, tests verdes, documento actualizado y tu confirmaci
 - Enlaces GitHub, estado PR.
 - **Salida:** `BPIM-183-qas` empujada sin tocar `release/1.0.5`.
 
-### Fase 6 — Scripts BD y conexiones (4-5 días)
+#### 16.5.1 Implementación MVP entregada
+
+- Selección múltiple en la tabla de requerimientos (por fila y por página) con barra de acción “Preparar despliegue”.
+- `deployment_preview({ requirementIds, environment })`: agrupa repositorios, marca comunes/exclusivos, lista requerimientos sin mapeo y bloquea repos sin rama de ambiente.
+- `deployment_prepare`: crea una sesión de squash por repositorio usando la rama del ambiente como target; guarda `environment`, `target_branch`, `target_base_sha`.
+- `deployment_apply`: verifica base drift contra `target_base_sha`, crea la rama hija desde la rama del ambiente y reaplica **solo el commit squash** con `cherry-pick -n`; no arrastra cambios ajenos si el ambiente divergió.
+- `deployment_push`: solo empuja la rama hija con `git push -u` (sin force); rechaza si la rama remota existe con otro SHA y verifica el SHA remoto después del push.
+- Guard duro: nunca empuja a ramas de ambiente configuradas, `release/*`, `dev`, `qas`, `uat`, `prd`, `stage`, `master` ni `main`.
+- UI de reanudación: las sesiones de despliegue se retoman desde el banner de requerimientos y desde la vista **Lotes**; conflicto, stage, continue y abort reutilizan el worktree aislado de Fase 4.
+- Cada `deployment_prepare` crea un `batch_id` y lo asigna a todas sus sesiones. La vista Lotes agrupa por lote, muestra ambiente, requerimientos, repos, avance, conflictos y permite reanudar o cancelar.
+- Tras el push se ofrecen enlaces de comparación y creación de PR en GitHub (sin merge automático).
+- El sidebar se puede colapsar y recuerda la preferencia en `localStorage`.
+- Nombre de rama: claves unidas + ambiente (`BPIM-139-BPIM-140-qas`); si excede 90 caracteres, `<primera-clave>-bundle-<short>-<ambiente>`.
+- La rama hija **no** lleva prefijo `feature/`: ese prefijo pertenece a la rama del requerimiento.
+- El worktree del despliegue trabaja en **HEAD detached**. La rama hija se crea como `refs/heads/<claves>-<ambiente>` sin quedar checkout, así TortoiseGit u otra herramienta pueden abrirla sin el error de “linked repository”. `deployment_push` verifica que la ref local siga en `deploy_sha` y empuja exactamente ese SHA (`<sha>:refs/heads/<rama>`); si la rama fue modificada externamente, rechaza el push para no sobrescribir trabajo.
+- Pruebas: 38 Rust (incluye apply, push real a remoto bare, base drift, guard de ambiente, rama libre durante conflicto, continue con HEAD detached y agrupación de lotes) y 11 frontend.
+- Pendiente para completar la visión extendida: estado de PR vía GitHub API y push multi-repo paralelo.
+
+### Fase 6 - Scripts BD y conexiones (4-5 días)
 
 - DPAPI, CRUD de conexiones, test.
 - CRUD/orden de scripts, editor SQL.
 - Ejecutores SQL Server/PostgreSQL, confirmación, salida en vivo, ejecuciones.
 - **Salida:** script ejecutado en dev/qas; sin conexión bloquea con alerta.
+
+#### 16.6.1 Implementación MVP entregada
+
+- `secrets` + DPAPI (`CryptProtectData`/`CryptUnprotectData` con entropía de app). Las contraseñas nunca se devuelven al frontend ni se registran en logs.
+- Conexiones globales o por repositorio, con ambiente del catálogo (incluye ambientes personalizados como `ppr`), motor SQL Server/PostgreSQL, SSL configurable y prueba `SELECT 1`.
+- CRUD de scripts por requerimiento + repositorio, orden secuencial, scope por ambiente, origen inline o archivo `.sql`, checksum SHA-256 y activación/desactivación.
+- Ejecución con confirmación explícita; en PRD se exige escribir `PRD`. Si no hay conexión para el ambiente, la UI bloquea la ejecución.
+- Ejecutores nativos: `tiberius` para SQL Server (lotes separados por `GO`) y `tokio-postgres`/`native-tls` para PostgreSQL.
+- Resultado por script en vivo vía evento Tauri `db-script-executed`, con estado, duración, salida/error y persistencia en `db_script_executions`.
+- Historial de últimas ejecuciones en el panel de scripts.
+- Pendiente para una siguiente iteración: streaming línea por línea de la salida SQL, transacciones configurables por script, autenticación Windows integrada y validación SQL avanzada.
+- Pruebas: 43 Rust (incluye DPAPI round-trip, CRUD cifrado de conexiones/scripts y parseo de lotes `GO`) y 11 frontend.
 
 ### Fase 7 — Estado por ambiente e historial (2-3 días)
 
@@ -3027,12 +3061,13 @@ No bloquean el diseño; se proponen defaults.
 - [ ] `CreateBranches`.
 - [ ] `AnalyzeRequirement`.
 - [ ] `MergeSquash` + `CherryPick` + `NoChanges`.
-- [ ] `DeployBranch` + `BaseDrift`.
-- [ ] `PushOwnBranch` + guard de ambiente + lease.
+- [x] `DeployBranch` + `BaseDrift`.
+- [x] `PushOwnBranch` + guard de ambiente + lease.
 - [ ] Máquina de estados + checkpoints + reanudación.
 - [ ] Logs + eventos.
-- [ ] GitHub PR read-only + links.
-- [ ] DPAPI + conexiones + scripts + ejecutores.
+- [x] Enlaces GitHub de comparación y PR (sin API).
+- [ ] Estado de PR vía GitHub API.
+- [x] DPAPI + conexiones + scripts + ejecutores (MVP SQL Server/PostgreSQL).
 - [ ] Estado por ambiente + agregación.
 - [ ] Tests unitarios/integración.
 
@@ -3044,11 +3079,11 @@ No bloquean el diseño; se proponen defaults.
 - [ ] Import wizard + preview.
 - [ ] Formulario "Nuevo requerimiento" + edición/archivado manual.
 - [ ] Config de repos + matriz de ambientes.
-- [ ] Wizard de despliegue (5 pasos).
+- [x] Wizard de despliegue (MVP: selección → ambiente → squash por repo → rama hija → push).
 - [ ] Consola en vivo + filtros.
 - [ ] Modal de conflicto + VS Code + stage/continue/abort.
-- [ ] Panel de scripts + conexiones + test.
-- [ ] Historial de lotes + reanudar.
+- [x] Panel de scripts + conexiones + test.
+- [x] Historial de lotes + reanudar.
 - [ ] Settings.
 - [ ] Manejo de errores/empty/loading.
 - [ ] Tests de componentes críticos.
@@ -3058,7 +3093,7 @@ No bloquean el diseño; se proponen defaults.
 - [ ] Instalador NSIS/MSI + iconos.
 - [ ] README de usuario + troubleshooting.
 - [ ] Checklist de aceptación (sección 15.5) ejecutado.
-- [ ] Verificación explícita: `origin/<ambiente>` no cambió tras un despliegue.
+- [x] Verificación explícita: `origin/<ambiente>` no cambió tras un despliegue.
 - [ ] Verificación explícita: no hay secretos en logs/BD en claro.
 
 ---

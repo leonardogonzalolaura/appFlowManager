@@ -33,6 +33,32 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
     ],
     status: 'next',
   },
+  'Fase 3': {
+    phase: 'Fase 3',
+    title: 'Ramas y análisis de commits',
+    summary:
+      'Crea la rama de cada requerimiento desde la base y revisa qué cambió realmente.',
+    bullets: [
+      'Creación de ramas desde origin/<base> con validación de nombres.',
+      'Análisis base..rama: commits, ahead/behind, archivos y merge-base.',
+      'Alerta y bloqueo cuando una rama no tiene commits.',
+      'Comparación entre varios requerimientos del mismo repositorio.',
+    ],
+    status: 'next',
+  },
+  'Fase 4': {
+    phase: 'Fase 4',
+    title: 'Squash y resolución de conflictos',
+    summary:
+      'Unifica varios requerimientos por repositorio y prepara un solo commit por despliegue.',
+    bullets: [
+      'Selección de todos los commits o de un subconjunto por requerimiento.',
+      'Squash con mensaje editable y trailers de trazabilidad.',
+      'Pausa ante conflictos, apertura en VS Code, staging y continuación.',
+      'Worktrees aislados para no tocar tu copia de trabajo.',
+    ],
+    status: 'next',
+  },
   'Fase 5': {
     phase: 'Fase 5',
     title: 'Rama de despliegue y push seguro',

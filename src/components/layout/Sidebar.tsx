@@ -8,6 +8,8 @@ interface SidebarProps {
   onOpenGuide: () => void;
   ready: boolean;
   loading: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
 }
 
 interface NavItem {
@@ -20,13 +22,13 @@ interface NavItem {
 
 const workspace: NavItem[] = [
   { id: 'inicio', label: 'Inicio', icon: 'home', available: true },
-  { id: 'requerimientos', label: 'Requerimientos', icon: 'list', phase: 'Fase 2' },
-  { id: 'lotes', label: 'Lotes', icon: 'package', phase: 'Fase 5' },
+  { id: 'requerimientos', label: 'Requerimientos', icon: 'list', available: true },
+  { id: 'lotes', label: 'Lotes', icon: 'package', available: true },
   { id: 'repositorios', label: 'Repositorios', icon: 'branch', available: true },
 ];
 
 const system: NavItem[] = [
-  { id: 'bases', label: 'Bases de datos', icon: 'database', phase: 'Fase 6' },
+  { id: 'bases', label: 'Bases de datos', icon: 'database', available: true },
   { id: 'configuracion', label: 'Configuración', icon: 'settings', available: true },
 ];
 
@@ -37,6 +39,8 @@ export function Sidebar({
   onOpenGuide,
   ready,
   loading,
+  collapsed,
+  onToggle,
 }: SidebarProps) {
   function renderItem(item: NavItem) {
     const active = item.id === view;
@@ -46,6 +50,7 @@ export function Sidebar({
       <button
         key={item.id}
         type="button"
+        title={collapsed ? item.label : undefined}
         className={`nav-item ${active ? 'is-active' : ''} ${available ? '' : 'is-locked'}`.trim()}
         aria-current={active ? 'page' : undefined}
         aria-disabled={!available}
@@ -67,7 +72,17 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? 'is-collapsed' : ''}`.trim()}>
+      <button
+        type="button"
+        className="sidebar-collapse"
+        onClick={onToggle}
+        title={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+        aria-label={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+        aria-expanded={!collapsed}
+      >
+        <Icon name="chevron-right" size={14} />
+      </button>
       <div className="sidebar-section">
         <p className="sidebar-heading">Espacio de trabajo</p>
         <nav className="nav-list" aria-label="Espacio de trabajo">
@@ -100,7 +115,7 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="sidebar-footer-badge">MVP</span>
-        <span>Fase 1 · Repositorios</span>
+        <span>Fase 6 · Scripts BD</span>
       </div>
     </aside>
   );

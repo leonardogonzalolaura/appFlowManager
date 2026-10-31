@@ -4,10 +4,10 @@ Aplicación de escritorio (Tauri 2 + React + Rust + SQLite) para orquestar
 requerimientos, ramas, despliegues y scripts de base de datos entre varios
 repositorios Git.
 
-> Estado actual: **Fase 1 — Repositorios y ambientes**. La app abre maximizada,
-> crea su base local, detecta Git, permite registrar o clonar repositorios y
-> resuelve la rama de DEV, QAS, UAT y PRD con evidencia y override manual.
-> Las fases 2–8 se implementan y validan por separado.
+> Estado actual: **Fase 4 — Squash y conflictos**. La app importa requerimientos,
+> crea ramas y las unifica en un commit squash aislado. Si hay conflictos, pausa
+> y permite resolverlos en VS Code sin tocar tu copia principal. Las fases 5–8
+> se implementan y validan por separado.
 
 ## Requisitos
 
@@ -57,6 +57,67 @@ cd src-tauri; cargo test
 - Quitar repositorio sin borrar la carpeta local ni el historial.
 
 La app **no** crea ramas, no hace push y no modifica el remoto en esta fase.
+
+## Qué incluye la Fase 2
+
+- Importación del export real de Monday en **XLSX o CSV**.
+- Vista previa antes de confirmar:
+  - nuevos, actualizados, sin cambios y ausentes,
+  - conflictos con requerimientos manuales,
+  - filas inválidas y Task IDs duplicados.
+- Upsert transaccional por `Task ID`; reimportar no duplica.
+- Subitems de Monday guardados y visibles en el detalle.
+- Registro manual de requerimientos con key automática `MAN-0001`.
+- Edición, archivado (soft delete) y bloqueo contra futuras importaciones.
+- Mapeo manual de requerimientos a repositorios y rama.
+- Tabla tipo Excel con búsqueda, filtros por origen/developer/estado/prioridad/
+  feature, “Solo mis requerimientos” y paginación.
+- Detalle con campos de Monday, notas locales, subitems y repositorios.
+
+Los campos de Monday son de solo lectura; notas y mapeos locales siempre se
+conservan. Un manual no se sobrescribe por Monday sin confirmación.
+
+## Qué incluye la Fase 3
+
+- Creación de la rama de cada requerimiento desde `origin/<base>` (o la base local
+  si el remoto no está disponible).
+- Antes de crear se ejecuta `git fetch --prune origin <base>`; si el fetch falla,
+  la rama no se crea y se muestra el error. Nunca se borra ni reescribe el
+  `master` local.
+- Convención de nombre:
+  - `feature/<Task ID>` para User Story, Task y tipos normales.
+  - `fix/<Task ID>` para Bug y Hotfix.
+  - Las ramas planificadas existentes se normalizan al aplicar la migración.
+- Si la rama ya existe en local:
+  - muestra sus commits y ahead/behind,
+  - permite **conservarla** o **recrearla desde cero**,
+  - recrear elimina solo la rama local y avisa que los commits se descartan.
+- Si la rama existe en `origin`, no se sobrescribe: se puede crear una copia local
+  que la siga.
+- Push opcional de la rama propia con `git push -u`; nunca `--force`.
+- Análisis `base..rama`:
+  - commits con autor y fecha,
+  - marca de commits ajenos (el mensaje no menciona el Task ID),
+  - ahead/behind, archivos modificados y líneas agregadas/eliminadas,
+  - estado `sin commits` que bloquea el despliegue.
+- El análisis queda guardado en el mapeo para futuras fases.
+
+## Qué incluye la Fase 4
+
+- Squash de uno o varios requerimientos del mismo repositorio.
+- Worktree aislado por sesión; nunca se toca la copia principal.
+- Dos estrategias:
+  - **Todos los commits** con `merge --squash`,
+  - **Selección de commits** con `cherry-pick -n`.
+- Mensaje final editable y commit único.
+- Pausa ante conflictos con:
+  - detección de archivos sin resolver,
+  - abrir worktree en VS Code o el explorador,
+  - `git add` por archivo o agregar todos,
+  - continuar cuando no queden conflictos,
+  - abortar y limpiar el worktree sin tocar las ramas originales.
+- Las sesiones quedan persistidas para reanudar después de cerrar la app.
+- El resultado se marca como listo para que la Fase 5 lo aplique a la rama del ambiente.
 
 ## Dónde vive la información
 

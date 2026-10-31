@@ -1,5 +1,9 @@
+pub mod branch_ops;
 pub mod git_cli;
 pub mod git_reader;
+pub mod requirements_parser;
+pub mod secrets;
+pub mod squash_ops;
 
 use crate::error::AppError;
 use std::path::{Path, PathBuf};

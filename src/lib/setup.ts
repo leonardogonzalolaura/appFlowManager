@@ -59,7 +59,7 @@ export function buildChecklist(info: SystemInfo): ChecklistItem[] {
         'Importa el export de Monday o registra un requerimiento manual que todavía no existe allí.',
       phase: 'Fase 2',
       done: setup.requirementsOk,
-      available: false,
+      available: true,
       detail: setup.requirementsOk
         ? `${info.counts.requirements} requerimiento(s) cargado(s)`
         : 'La lista está vacía por ahora.',

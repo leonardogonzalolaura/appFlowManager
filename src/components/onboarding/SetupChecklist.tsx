@@ -6,6 +6,7 @@ interface SetupChecklistProps {
   items: ChecklistItem[];
   onOpenDiagnostics: () => void;
   onOpenRepositories: () => void;
+  onOpenRequirements: () => void;
   onOpenPhase: (phase: string) => void;
 }
 
@@ -13,6 +14,7 @@ export function SetupChecklist({
   items,
   onOpenDiagnostics,
   onOpenRepositories,
+  onOpenRequirements,
   onOpenPhase,
 }: SetupChecklistProps) {
   return (
@@ -60,6 +62,15 @@ export function SetupChecklist({
                     onClick={onOpenRepositories}
                   >
                     {item.done ? 'Revisar repositorios' : 'Configurar repositorios'}
+                    <Icon name="chevron-right" size={13} />
+                  </button>
+                ) : item.id === 'requerimientos' ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={onOpenRequirements}
+                  >
+                    {item.done ? 'Ver requerimientos' : 'Cargar requerimientos'}
                     <Icon name="chevron-right" size={13} />
                   </button>
                 ) : item.available ? (

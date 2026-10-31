@@ -17,6 +17,7 @@ interface HomeViewProps {
   onOpenGuide: () => void;
   onOpenSettings: () => void;
   onOpenRepositories: () => void;
+  onOpenRequirements: () => void;
   onOpenPhase: (phase: string) => void;
   onCopy: (value: string, label: string) => void;
   onOpenDir: (
@@ -34,6 +35,7 @@ export function HomeView({
   onOpenGuide,
   onOpenSettings,
   onOpenRepositories,
+  onOpenRequirements,
   onOpenPhase,
   onCopy,
   onOpenDir,
@@ -75,24 +77,24 @@ export function HomeView({
         <div className="welcome-copy">
           <div className="hero-kicker">
             <Icon name="sparkles" size={13} />
-            Fase 1 · Repositorios y ambientes
+            Fase 4 · Squash y conflictos
           </div>
           <h2 className="hero-title">
             Tu centro de mando para desplegar con calma.
           </h2>
           <p className="hero-text">
-            FlowManager reúne requerimientos, ramas y scripts para que cada
-            despliegue sea trazable, reversible y sin sorpresas en los
-            ambientes.
+            FlowManager reúne requerimientos de Monday y manuales, ramas y
+            scripts para que cada despliegue sea trazable, reversible y sin
+            sorpresas en los ambientes.
           </p>
           <div className="hero-actions">
-            <button type="button" className="btn btn-primary" onClick={onOpenRepositories}>
-              <Icon name="branch" size={15} />
-              Configurar repositorios
+            <button type="button" className="btn btn-primary" onClick={onOpenRequirements}>
+              <Icon name="list" size={15} />
+              Cargar requerimientos
             </button>
-            <button type="button" className="btn btn-secondary" onClick={onOpenGuide}>
-              <Icon name="book" size={15} />
-              Guía de configuración
+            <button type="button" className="btn btn-secondary" onClick={onOpenRepositories}>
+              <Icon name="branch" size={15} />
+              Repositorios
             </button>
           </div>
           <p className="hero-footnote">
@@ -121,9 +123,11 @@ export function HomeView({
           <p className="hero-progress-hint">
             {!ready
               ? 'Hay algo pendiente en el entorno. Lo revisamos juntos antes de continuar.'
-              : info.setup.repositoriesOk
-                ? 'Los repositorios están listos. El siguiente paso es cargar requerimientos.'
-                : 'El entorno está listo. Conecta tu primer repositorio para continuar.'}
+              : info.setup.repositoriesOk && !info.setup.requirementsOk
+                ? 'Los repositorios están listos. Importa Monday o registra un manual.'
+                : info.setup.requirementsOk
+                  ? 'Los requerimientos están cargados. El siguiente paso es crear ramas y analizar commits.'
+                  : 'El entorno está listo. Conecta tu primer repositorio para continuar.'}
           </p>
           <div className="hero-progress-chips">
             <StatusChip tone={info.git.available ? 'success' : 'danger'} dot>
@@ -183,6 +187,7 @@ export function HomeView({
           items={checklist}
           onOpenDiagnostics={onOpenSettings}
           onOpenRepositories={onOpenRepositories}
+          onOpenRequirements={onOpenRequirements}
           onOpenPhase={onOpenPhase}
         />
 
@@ -197,24 +202,24 @@ export function HomeView({
 
       <section className="next-milestone">
         <div className="next-milestone-icon">
-          <Icon name="list" size={20} />
+          <Icon name="rocket" size={20} />
         </div>
         <div className="next-milestone-body">
           <div className="next-milestone-head">
-            <h2>Siguiente hito: carga de requerimientos</h2>
-            <StatusChip tone="info">Fase 2</StatusChip>
+            <h2>Siguiente hito: rama de despliegue y push</h2>
+            <StatusChip tone="info">Fase 5</StatusChip>
           </div>
           <p>
-            Importa el export de Monday o registra un requerimiento manual, con
-            mapeo a tus repositorios y filtros por developer.
+            Aplica el squash sobre una rama hija del ambiente, empuja solo esa rama y
+            deja el merge para GitHub.
           </p>
         </div>
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => onOpenPhase('Fase 2')}
+          onClick={() => onOpenPhase('Fase 5')}
         >
-          Ver qué incluye
+          Ver Fase 5
           <Icon name="arrow-right" size={14} />
         </button>
       </section>
@@ -224,7 +229,7 @@ export function HomeView({
         <span className="content-footer-sep">·</span>
         <span>{info.os} {info.arch}</span>
         <span className="content-footer-sep">·</span>
-        <span>Fase 1 de 8</span>
+        <span>Fase 4 de 8</span>
       </footer>
     </div>
   );

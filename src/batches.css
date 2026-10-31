@@ -1,0 +1,221 @@
+/* ==========================================================================
+   FlowManager — Fase 5: lotes de despliegue
+   ========================================================================== */
+
+.batches {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.batches-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.batches-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.batches-stat span {
+  color: var(--text-muted);
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.batches-stat strong {
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.batches-stat.is-warning {
+  border-color: var(--yellow-border);
+  background: linear-gradient(180deg, var(--yellow-soft), transparent 80%),
+    var(--bg-surface);
+}
+
+.batches-stat.is-warning span,
+.batches-stat.is-warning strong {
+  color: var(--yellow);
+}
+
+.batches-stat.is-done strong {
+  color: var(--green);
+}
+
+.batches-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.batches-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.batches-error {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius-md);
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 10px;
+}
+
+.batches-error span {
+  flex: 1;
+}
+
+.batches-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.batch-card.is-conflict {
+  border-color: var(--yellow-border);
+}
+
+.batch-card.is-completed {
+  border-color: var(--green-border);
+}
+
+.batch-card.is-failed {
+  border-color: var(--red-border);
+}
+
+.batch-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.batch-card-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.batch-card-head small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.batch-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-title-row strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.batch-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-progress-bar {
+  flex: 1;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+.batch-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent), var(--green));
+  transition: width 200ms ease;
+}
+
+.batch-progress > span {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.batch-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.batch-repos,
+.batch-reqs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.batch-repos span {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 8.5px;
+}
+
+.batch-reqs code {
+  padding: 1px 5px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 8.5px;
+}
+
+.batch-reqs span {
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.batch-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 2px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
+.batch-card-footer code {
+  color: var(--text-muted);
+  font-size: 8.5px;
+}

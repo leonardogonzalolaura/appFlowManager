@@ -35,7 +35,7 @@ export function GuideModal({ info, onClose, onGoSettings }: GuideModalProps) {
       description:
         'Importa el export de Monday o registra un requerimiento manual. Después podrás mapearlo a uno o varios repos.',
       done: setup.requirementsOk,
-      available: false,
+      available: true,
     },
     {
       title: 'Configura las bases de datos',

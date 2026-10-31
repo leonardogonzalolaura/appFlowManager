@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sidebar } from './components/layout/Sidebar';
 import { TitleBar } from './components/layout/TitleBar';
@@ -13,7 +13,10 @@ import { normalizeError, openAppDir } from './lib/api';
 import { copyText } from './lib/format';
 import type { ViewId } from './types';
 import { HomeView } from './views/HomeView';
+import { DatabaseView } from './views/DatabaseView';
+import { LotesView } from './views/LotesView';
 import { RepositoriesView } from './views/RepositoriesView';
+import { RequirementsView } from './views/RequirementsView';
 import { SettingsView } from './views/SettingsView';
 import './App.css';
 
@@ -23,6 +26,16 @@ function App() {
   const [showGuide, setShowGuide] = useState(false);
   const [phaseModal, setPhaseModal] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('flowmanager.sidebarCollapsed') === '1',
+  );
+
+  useEffect(() => {
+    localStorage.setItem(
+      'flowmanager.sidebarCollapsed',
+      sidebarCollapsed ? '1' : '0',
+    );
+  }, [sidebarCollapsed]);
 
   const ready = Boolean(info?.git.available && info?.dbReady);
 
@@ -83,15 +96,27 @@ function App() {
   const title =
     view === 'inicio'
       ? 'Inicio'
-      : view === 'repositorios'
-        ? 'Repositorios'
-        : 'Configuración';
+      : view === 'requerimientos'
+        ? 'Requerimientos'
+        : view === 'lotes'
+          ? 'Lotes'
+          : view === 'repositorios'
+            ? 'Repositorios'
+            : view === 'bases'
+              ? 'Bases de datos'
+              : 'Configuración';
   const subtitle =
     view === 'inicio'
       ? 'Revisa el estado del sistema y sigue la configuración inicial.'
-      : view === 'repositorios'
-        ? 'Conecta tus repos y define la rama de cada ambiente.'
-        : 'Diagnóstico, rutas y preferencias de FlowManager.';
+      : view === 'requerimientos'
+        ? 'Importa Monday, registra requerimientos manuales y filtra lo que necesitas.'
+        : view === 'lotes'
+          ? 'Sigue el avance de cada despliegue, reanuda conflictos y empuja sus ramas.'
+          : view === 'repositorios'
+            ? 'Conecta tus repos y define la rama de cada ambiente.'
+            : view === 'bases'
+              ? 'Configura conexiones por ambiente y prueba el acceso a tus bases de datos.'
+              : 'Diagnóstico, rutas y preferencias de FlowManager.';
 
   function handleNavigate(next: ViewId) {
     setView(next);
@@ -112,6 +137,8 @@ function App() {
           onOpenGuide={() => setShowGuide(true)}
           ready={ready}
           loading={loading && !info}
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((value) => !value)}
         />
 
         <main className="main">
@@ -136,12 +163,19 @@ function App() {
                 onOpenGuide={() => setShowGuide(true)}
                 onOpenSettings={() => setView('configuracion')}
                 onOpenRepositories={() => setView('repositorios')}
+                onOpenRequirements={() => setView('requerimientos')}
                 onOpenPhase={setPhaseModal}
                 onCopy={(value, label) => void handleCopy(value, label)}
                 onOpenDir={(kind, label) => void handleOpenDir(kind, label)}
               />
+            ) : view === 'requerimientos' ? (
+              <RequirementsView />
+            ) : view === 'lotes' ? (
+              <LotesView />
             ) : view === 'repositorios' ? (
               <RepositoriesView />
+            ) : view === 'bases' ? (
+              <DatabaseView />
             ) : info ? (
               <SettingsView
                 info={info}
