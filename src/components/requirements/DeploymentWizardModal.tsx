@@ -682,7 +682,7 @@ export function DeploymentWizardModal({
             <div className="deployment-step">
               <span className="deployment-step-number">3</span>
               <span>
-                <strong>Empujar rama</strong>
+                <strong>Pushear rama</strong>
                 <small>Sube solo la rama hija al remoto</small>
               </span>
             </div>
@@ -1053,7 +1053,7 @@ function DeploymentSessionCard({
             <div className="squash-conflict-actions">
               <button type="button" className="btn btn-primary btn-sm" onClick={onPush}>
                 <Icon name="rocket" size={13} />
-                Empujar rama
+                Pushear rama
               </button>
               <button
                 type="button"
@@ -1272,7 +1272,7 @@ function cardLabel(session: SquashSession): string {
   if (session.status === 'failed') return 'Falló';
   if (session.status === 'preparing') return 'Preparando';
   if (session.status === 'aborted') return 'Descartada';
-  if (session.phase === 'deploy') return 'Falta empujar';
+  if (session.phase === 'deploy') return 'Falta pushear';
   return 'Falta crear rama';
 }
 

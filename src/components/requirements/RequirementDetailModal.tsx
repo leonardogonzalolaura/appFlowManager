@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { normalizeError } from '../../lib/api';
 import { analyzeRequirementBranches } from '../../lib/branches';
 import { formatDateTime } from '../../lib/format';
+import { listDbScripts } from '../../lib/database';
 import {
   getRequirement,
   unassignRequirementRepository,
@@ -10,6 +11,7 @@ import {
 import type {
   ApiError,
   BranchOperationResult,
+  DbScriptSummary,
   RepositoryBranchAnalysis,
   RequirementDetail,
   RequirementRepositoryMapping,
@@ -52,6 +54,21 @@ export function RequirementDetailModal({
   const [analyses, setAnalyses] = useState<RepositoryBranchAnalysis[] | null>(null);
   const [analyzingRepo, setAnalyzingRepo] = useState<string | null>(null);
   const [scriptsOpen, setScriptsOpen] = useState(false);
+  const [scripts, setScripts] = useState<DbScriptSummary[]>([]);
+  const [scriptsLoading, setScriptsLoading] = useState(true);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [subitemsOpen, setSubitemsOpen] = useState<boolean | null>(null);
+
+  async function loadScripts() {
+    setScriptsLoading(true);
+    try {
+      setScripts(await listDbScripts({ requirementId }));
+    } catch {
+      setScripts([]);
+    } finally {
+      setScriptsLoading(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -60,6 +77,7 @@ export function RequirementDetailModal({
       setDetail(loaded);
       setNotes(loaded.notes ?? '');
       setError(null);
+      void loadScripts();
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -68,6 +86,8 @@ export function RequirementDetailModal({
   }
 
   useEffect(() => {
+    setInfoOpen(false);
+    setSubitemsOpen(null);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirementId]);
@@ -151,6 +171,9 @@ export function RequirementDetailModal({
         0,
       )
     : 0;
+  const infoSummary = detail ? summarizeDetail(detail) : [];
+  const subitemsExpanded =
+    subitemsOpen ?? (detail ? detail.subtasks.length <= 3 : true);
 
   return (
     <>
@@ -214,111 +237,66 @@ export function RequirementDetailModal({
           </Callout>
         ) : detail ? (
           <>
-            <div className="req-detail-grid">
-              <DetailField label="Feature" value={detail.feature} />
-              <DetailField label="Tipo" value={detail.type} />
-              <DetailField label="Developer" value={detail.developer} />
-              <DetailField label="QA" value={detail.qa} />
-              <DetailField label="Estado" value={detail.status} />
-              <DetailField label="Prioridad" value={detail.priority} />
-              <DetailField label="Informed" value={detail.informed} />
-              <DetailField
-                label="Timeline"
-                value={
-                  detail.timelineStart || detail.timelineEnd
-                    ? `${detail.timelineStart ?? '—'} → ${detail.timelineEnd ?? '—'}`
-                    : null
-                }
-              />
-              <DetailField
-                label="Sub Tasks (Monday)"
-                value={detail.subtasksSummary}
-                wide
-              />
-              <DetailField
-                label="Actualizado en Monday"
-                value={
-                  detail.sourceUpdatedAt
-                    ? detail.sourceUpdatedAt
-                    : 'Sin dato de origen'
-                }
-              />
-              <DetailField
-                label="Visto por última vez"
-                value={formatDateTime(detail.lastSeenAt)}
-              />
-            </div>
-
-            {detail.source === 'monday' ? (
-              <div className="req-readonly-note">
-                <Icon name="lock" size={14} />
-                <span>
-                  Los campos de Monday no se editan aquí. Las notas locales y los
-                  mapeos sí se conservan y puedes cambiarlos.
+            <section className={`req-collapsible ${infoOpen ? 'is-open' : ''}`}>
+              <button
+                type="button"
+                className="req-collapsible-head"
+                aria-expanded={infoOpen}
+                aria-controls="req-info-body"
+                onClick={() => setInfoOpen((value) => !value)}
+              >
+                <span className="req-collapsible-title">
+                  <Icon name="info" size={13} />
+                  Información del ticket
                 </span>
-              </div>
-            ) : null}
+                {!infoOpen && infoSummary.length > 0 ? (
+                  <span className="req-collapsible-summary">
+                    {infoSummary.map((item, index) => (
+                      <span key={`${item}-${index}`}>{item}</span>
+                    ))}
+                  </span>
+                ) : null}
+                <Icon
+                  name="chevron-down"
+                  size={14}
+                  className="req-collapsible-chevron"
+                />
+              </button>
 
-            <section className="req-detail-section">
-              <div className="req-detail-section-head">
-                <h3>Notas locales</h3>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => void saveNotes()}
-                  disabled={savingNotes || notes === (detail.notes ?? '')}
-                >
-                  {savingNotes ? <Spinner size="sm" /> : <Icon name="check" size={13} />}
-                  Guardar notas
-                </button>
-              </div>
-              <textarea
-                className="input textarea"
-                rows={3}
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Contexto, enlaces o decisiones locales."
-              />
-            </section>
+              <div id="req-info-body" className="req-collapsible-body" hidden={!infoOpen}>
+                <div className="req-detail-grid">
+                  <DetailField label="Feature" value={detail.feature} />
+                  <DetailField label="Tipo" value={detail.type} />
+                  <DetailField label="Developer" value={detail.developer} />
+                  <DetailField label="QA" value={detail.qa} />
+                  <DetailField label="Estado" value={detail.status} />
+                  <DetailField label="Prioridad" value={detail.priority} />
+                  <DetailField label="Informed" value={detail.informed} />
+                  <DetailField
+                    label="Timeline"
+                    value={
+                      detail.timelineStart || detail.timelineEnd
+                        ? `${detail.timelineStart ?? '—'} → ${detail.timelineEnd ?? '—'}`
+                        : null
+                    }
+                  />
+                  <DetailField
+                    label="Sub Tasks (Monday)"
+                    value={detail.subtasksSummary}
+                    wide
+                  />
+                </div>
 
-            <section className="req-detail-section">
-              <div className="req-detail-section-head">
-                <h3>
-                  Subitems{' '}
-                  <span className="req-section-count">{detail.subtasks.length}</span>
-                </h3>
-                {totalSp > 0 ? (
-                  <span className="req-section-meta">{totalSp} SP estimados</span>
+                {detail.source === 'monday' ? (
+                  <div className="req-readonly-note">
+                    <Icon name="lock" size={14} />
+                    <span>
+                      Los campos de Monday no se editan aquí. Las notas locales y los
+                      mapeos sí se conservan y puedes cambiarlos.
+                    </span>
+                  </div>
                 ) : null}
               </div>
-              {detail.subtasks.length === 0 ? (
-                <p className="req-empty-line">
-                  {detail.subtasksSummary ?? 'Sin subitems en el export.'}
-                </p>
-              ) : (
-                <div className="req-subtasks">
-                  {detail.subtasks.map((subtask) => (
-                    <div key={subtask.id} className="req-subtask">
-                      <span className="req-subtask-name">{subtask.name}</span>
-                      <span className="req-subtask-owner">{subtask.owner ?? '—'}</span>
-                      <StatusChip
-                        tone={
-                          subtask.status === 'Done'
-                            ? 'success'
-                            : subtask.status
-                              ? 'info'
-                              : 'neutral'
-                        }
-                      >
-                        {subtask.status ?? 'Sin estado'}
-                      </StatusChip>
-                      <span className="req-subtask-sp">
-                        {subtask.estimatedSp ?? '—'} SP
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </section>
 
             <section className="req-detail-section">
@@ -422,7 +400,10 @@ export function RequirementDetailModal({
 
             <section className="req-detail-section">
               <div className="req-detail-section-head">
-                <h3>Scripts SQL</h3>
+                <h3>
+                  Scripts SQL{' '}
+                  <span className="req-section-count">{scripts.length}</span>
+                </h3>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -432,15 +413,151 @@ export function RequirementDetailModal({
                   Gestionar scripts
                 </button>
               </div>
-              <p className="req-empty-line">
-                Scripts de base de datos asociados a este requerimiento y sus repositorios.
-                Se ejecutan con confirmación y una conexión configurada.
-              </p>
+
+              {scriptsLoading ? (
+                <div className="req-scripts-loading">
+                  <Spinner size="sm" />
+                  <span>Leyendo scripts…</span>
+                </div>
+              ) : scripts.length === 0 ? (
+                <p className="req-empty-line">
+                  No hay scripts SQL. Usa “Gestionar scripts” para agregar el primero.
+                </p>
+              ) : (
+                <div className="req-script-list">
+                  {scripts.map((script) => (
+                    <button
+                      key={script.id}
+                      type="button"
+                      className="req-script-item"
+                      onClick={() => setScriptsOpen(true)}
+                      title="Abrir para editar o ejecutar"
+                    >
+                      <span className="req-script-seq">{script.sequenceNo}</span>
+                      <span className="req-script-copy">
+                        <strong>{script.name}</strong>
+                        <small>
+                          {script.repositoryName} ·{' '}
+                          {script.engine === 'sqlserver'
+                            ? 'SQL Server'
+                            : 'PostgreSQL'}{' '}
+                          ·{' '}
+                          {script.environmentScope === 'all'
+                            ? 'todos los ambientes'
+                            : `solo ${script.environmentScope}`}
+                        </small>
+                        <span
+                          className="req-script-sql"
+                          title={script.filePath ?? script.content ?? ''}
+                        >
+                          {scriptPreview(script)}
+                        </span>
+                      </span>
+                      <code>{script.checksum.slice(0, 8)}</code>
+                      <StatusChip tone={script.isActive ? 'info' : 'neutral'}>
+                        {script.isActive ? 'Activo' : 'Inactivo'}
+                      </StatusChip>
+                      <Icon name="chevron-right" size={13} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="req-detail-section">
+              <div className="req-detail-section-head">
+                <h3>Notas locales</h3>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void saveNotes()}
+                  disabled={savingNotes || notes === (detail.notes ?? '')}
+                >
+                  {savingNotes ? <Spinner size="sm" /> : <Icon name="check" size={13} />}
+                  Guardar notas
+                </button>
+              </div>
+              <textarea
+                className="input textarea"
+                rows={3}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Contexto, enlaces o decisiones locales."
+              />
+            </section>
+
+            <section
+              className={`req-detail-section req-collapsible ${subitemsExpanded ? 'is-open' : ''}`}
+            >
+              <button
+                type="button"
+                className="req-collapsible-head"
+                aria-expanded={subitemsExpanded}
+                aria-controls="req-subitems-body"
+                onClick={() => setSubitemsOpen(!subitemsExpanded)}
+              >
+                <span className="req-collapsible-title">
+                  Subitems{' '}
+                  <span className="req-section-count">{detail.subtasks.length}</span>
+                </span>
+                {totalSp > 0 ? (
+                  <span className="req-section-meta">{totalSp} SP estimados</span>
+                ) : null}
+                <Icon
+                  name="chevron-down"
+                  size={14}
+                  className="req-collapsible-chevron"
+                />
+              </button>
+
+              <div
+                id="req-subitems-body"
+                className="req-collapsible-body"
+                hidden={!subitemsExpanded}
+              >
+                {detail.subtasks.length === 0 ? (
+                  <p className="req-empty-line">
+                    {detail.subtasksSummary ?? 'Sin subitems en el export.'}
+                  </p>
+                ) : (
+                  <div className="req-subtasks">
+                    {detail.subtasks.map((subtask) => (
+                      <div key={subtask.id} className="req-subtask">
+                        <span className="req-subtask-name">{subtask.name}</span>
+                        <span className="req-subtask-owner">
+                          {subtask.owner ?? '—'}
+                        </span>
+                        <StatusChip
+                          tone={
+                            subtask.status === 'Done'
+                              ? 'success'
+                              : subtask.status
+                                ? 'info'
+                                : 'neutral'
+                          }
+                        >
+                          {subtask.status ?? 'Sin estado'}
+                        </StatusChip>
+                        <span className="req-subtask-sp">
+                          {subtask.estimatedSp ?? '—'} SP
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
 
             <footer className="req-detail-footer">
               <span>Creado {formatDateTime(detail.createdAt)}</span>
               <span>Actualizado {formatDateTime(detail.updatedAt)}</span>
+              <span>
+                Monday{' '}
+                {detail.sourceUpdatedAt
+                  ? formatDateTime(detail.sourceUpdatedAt)
+                  : 'sin dato'}
+              </span>
+              <span>Visto {formatDateTime(detail.lastSeenAt)}</span>
             </footer>
           </>
         ) : null}
@@ -481,11 +598,32 @@ export function RequirementDetailModal({
           requirementKey={detail.externalKey}
           repositories={detail.repositories}
           onClose={() => setScriptsOpen(false)}
-          onChanged={onChanged}
+          onChanged={() => {
+            void loadScripts();
+            onChanged();
+          }}
         />
       ) : null}
     </>
   );
+}
+
+function summarizeDetail(detail: RequirementDetail): string[] {
+  const people =
+    detail.developer || detail.qa
+      ? `${detail.developer ?? '—'} → ${detail.qa ?? '—'}`
+      : null;
+  return [detail.status, detail.priority, people].filter(
+    (value): value is string => Boolean(value?.trim()),
+  );
+}
+
+function scriptPreview(script: DbScriptSummary): string {
+  const text = script.content?.trim() || script.filePath || '';
+  if (!text) return 'SQL sin contenido';
+  const line = text.split(/\r?\n/).find((value) => value.trim().length > 0) ?? text;
+  const trimmed = line.trim();
+  return trimmed.length > 110 ? `${trimmed.slice(0, 110)}…` : trimmed;
 }
 
 function branchStatusTone(

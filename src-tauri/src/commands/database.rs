@@ -1139,7 +1139,7 @@ async fn execute_postgres(
         let (client, connection) = config
             .connect(NoTls)
             .await
-            .map_err(|error| format!("No se pudo conectar a PostgreSQL: {error}"))?;
+            .map_err(|error| format_pg_error(&error))?;
         tokio::spawn(async move {
             let _ = connection.await;
         });
@@ -1156,7 +1156,7 @@ async fn execute_postgres(
         let (client, connection) = config
             .connect(postgres_native_tls::MakeTlsConnector::new(connector))
             .await
-            .map_err(|error| format!("No se pudo conectar a PostgreSQL (TLS): {error}"))?;
+            .map_err(|error| format_pg_error(&error))?;
         tokio::spawn(async move {
             let _ = connection.await;
         });
@@ -1166,8 +1166,45 @@ async fn execute_postgres(
     client
         .batch_execute(sql)
         .await
-        .map_err(|error| format!("PostgreSQL: {error}"))?;
+        .map_err(|error| format_pg_error(&error))?;
     Ok("OK".into())
+}
+
+fn format_pg_error(error: &tokio_postgres::Error) -> String {
+    use std::error::Error as _;
+
+    if let Some(db_error) = error.as_db_error() {
+        let mut text = format!(
+            "PostgreSQL [{}]: {}",
+            db_error.code().code(),
+            db_error.message()
+        );
+        if let Some(detail) = db_error.detail() {
+            text.push_str(&format!(" · Detalle: {detail}"));
+        }
+        if let Some(hint) = db_error.hint() {
+            text.push_str(&format!(" · Sugerencia: {hint}"));
+        }
+        if let Some(position) = db_error.position() {
+            text.push_str(&format!(" · Posición: {position:?}"));
+        }
+        return text;
+    }
+
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let message = cause.to_string();
+        if !message.is_empty() && !text.contains(&message) {
+            text.push_str(": ");
+            text.push_str(&message);
+        }
+        source = cause.source();
+    }
+    if text.is_empty() || text == "db error" {
+        text = format!("PostgreSQL: {error:?}");
+    }
+    text
 }
 
 async fn execute_sqlserver(

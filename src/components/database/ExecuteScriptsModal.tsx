@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { normalizeError } from '../../lib/api';
 import { executeDbScripts } from '../../lib/database';
-import { formatDateTime } from '../../lib/format';
+import { copyText, formatDateTime } from '../../lib/format';
 import type {
   ApiError,
   DbConnectionSummary,
@@ -25,6 +25,40 @@ interface ExecuteScriptsModalProps {
   onExecuted?: () => void;
 }
 
+function resolveConnectionFor(
+  script: DbScriptSummary,
+  environment: string,
+  connections: DbConnectionSummary[],
+): DbConnectionSummary | undefined {
+  const candidates = connections.filter(
+    (connection) =>
+      connection.environment === environment &&
+      connection.isActive &&
+      connection.engine === script.engine,
+  );
+  return (
+    candidates.find(
+      (connection) => connection.repositoryId === script.repositoryId,
+    ) ?? candidates.find((connection) => connection.repositoryId === null)
+  );
+}
+
+function commonConnectionId(
+  scripts: DbScriptSummary[],
+  environment: string,
+  connections: DbConnectionSummary[],
+): string {
+  if (scripts.length === 0) return '';
+  const resolved = scripts.map((script) =>
+    resolveConnectionFor(script, environment, connections),
+  );
+  const first = resolved[0];
+  if (!first || resolved.some((connection) => connection?.id !== first.id)) {
+    return '';
+  }
+  return first.id;
+}
+
 export function ExecuteScriptsModal({
   scripts,
   environments,
@@ -37,7 +71,9 @@ export function ExecuteScriptsModal({
     environments[0]?.key ??
     '';
   const [environment, setEnvironment] = useState(initialEnvironment);
-  const [connectionId, setConnectionId] = useState('');
+  const [connectionId, setConnectionId] = useState(() =>
+    commonConnectionId(scripts, initialEnvironment, connections),
+  );
   const [stopOnError, setStopOnError] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
   const [prdText, setPrdText] = useState('');
@@ -74,13 +110,25 @@ export function ExecuteScriptsModal({
       ),
     [connections, environment],
   );
+  const resolvedConnections = useMemo(
+    () =>
+      scripts.map((script) => ({
+        script,
+        connection: resolveConnectionFor(script, environment, connections),
+      })),
+    [scripts, environment, connections],
+  );
   const selectedConnection = connectionId
     ? availableConnections.find((connection) => connection.id === connectionId)
     : undefined;
   const isPrd = environment === 'prd';
+  const allResolved = resolvedConnections.every(
+    (item) => item.connection !== undefined,
+  );
   const canExecute =
     scripts.length > 0 &&
     availableConnections.length > 0 &&
+    allResolved &&
     (isPrd ? prdText.trim().toUpperCase() === 'PRD' : confirmed) &&
     !busy;
 
@@ -149,8 +197,11 @@ export function ExecuteScriptsModal({
               className="input"
               value={environment}
               onChange={(event) => {
-                setEnvironment(event.target.value);
-                setConnectionId('');
+                const nextEnvironment = event.target.value;
+                setEnvironment(nextEnvironment);
+                setConnectionId(
+                  commonConnectionId(scripts, nextEnvironment, connections),
+                );
                 setConfirmed(false);
                 setPrdText('');
                 setResults([]);
@@ -175,10 +226,12 @@ export function ExecuteScriptsModal({
               disabled={busy || results.length > 0}
               autoComplete="off"
             >
-              <option value="">Automática (repo o global)</option>
+              <option value="">Automática por repositorio</option>
               {availableConnections.map((connection) => (
                 <option key={connection.id} value={connection.id}>
-                  {connection.repositoryName ?? 'Global'} · {connection.host}:{connection.port}
+                  {connection.repositoryName ?? 'Global'} · {connection.host}:
+                  {connection.port} ·{' '}
+                  {connection.engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL'}
                 </option>
               ))}
             </select>
@@ -193,6 +246,34 @@ export function ExecuteScriptsModal({
               {selectedConnection.databaseName} · {selectedConnection.username}
             </span>
           </div>
+        ) : null}
+
+        {!selectedConnection && resolvedConnections.length > 0 ? (
+          <div className="db-connection-map">
+            <span className="db-connection-map-title">
+              <Icon name="database" size={13} /> Conexión detectada por script
+            </span>
+            {resolvedConnections.map(({ script, connection }) => (
+              <div
+                key={script.id}
+                className={`db-connection-map-row ${connection ? '' : 'is-missing'}`.trim()}
+              >
+                <span>{script.name}</span>
+                <code>
+                  {connection
+                    ? `${connection.repositoryName ?? 'Global'} · ${connection.host}:${connection.port} / ${connection.databaseName}`
+                    : `Sin conexión ${script.engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL'} para ${script.repositoryName}`}
+                </code>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {availableConnections.length > 0 && !allResolved ? (
+          <Callout tone="warning" title="Falta conexión para algunos scripts">
+            Hay scripts cuyo repositorio/motor no tiene conexión en {environment}. La
+            ejecución queda bloqueada hasta configurarla.
+          </Callout>
         ) : null}
 
         {availableConnections.length === 0 ? (
@@ -294,7 +375,24 @@ export function ExecuteScriptsModal({
                   <span>{result.durationMs} ms</span>
                 </div>
                 {result.output ? <pre>{result.output}</pre> : null}
-                {result.error ? <pre className="db-result-error">{result.error}</pre> : null}
+                {result.error ? (
+                  <>
+                    <pre className="db-result-error">{result.error}</pre>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs db-copy-error"
+                      onClick={() => {
+                        void copyText(result.error ?? '')
+                          .then(() => toast.success('Error copiado'))
+                          .catch(() =>
+                            toast.error('No se pudo copiar el error'),
+                          );
+                      }}
+                    >
+                      Copiar error
+                    </button>
+                  </>
+                ) : null}
                 <small>{formatDateTime(result.executedAt)}</small>
               </div>
             ))}

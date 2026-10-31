@@ -311,7 +311,7 @@ function batchStatusLabel(status: DeploymentBatchSummary['status']): string {
     case 'completed':
       return 'Completado';
     case 'ready_push':
-      return 'Falta empujar';
+      return 'Falta pushear';
     case 'ready_create':
       return 'Falta crear rama';
     case 'failed':
