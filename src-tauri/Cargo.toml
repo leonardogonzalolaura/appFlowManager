@@ -1,0 +1,33 @@
+[package]
+name = "flowmanager"
+version = "0.1.0"
+description = "FlowManager - orquestador de requerimientos y despliegues"
+authors = ["Leonardo Gonzalo Laura"]
+edition = "2021"
+
+[lib]
+name = "flowmanager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+git2 = "0.18.3"
+regex = "1"
+uuid = { version = "1", features = ["v7"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tokio = { version = "1", features = ["time", "macros", "rt"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
