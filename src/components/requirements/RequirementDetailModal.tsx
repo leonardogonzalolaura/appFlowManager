@@ -525,7 +525,8 @@ export function RequirementDetailModal({
 
             <section className="req-detail-section">
               <div className="req-detail-section-head">
-                <h3>Notas locales</h3>
+                <h3 style={detail.notes ? { color: 'var(--red)' } : undefined}>
+                  Notas locales</h3>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"

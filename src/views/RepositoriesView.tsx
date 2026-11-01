@@ -10,10 +10,10 @@ import {
 } from '../lib/repositories';
 import type { EnvironmentState, RepositoryDetail, RepositorySummary } from '../types';
 import { useRepositories } from '../hooks/useRepositories';
-import { AddRepositoryModal } from '../components/repositories/AddRepositoryModal';
 import { BranchPickerModal } from '../components/repositories/BranchPickerModal';
 import { EditRepositoryModal } from '../components/repositories/EditRepositoryModal';
 import { EnvironmentsModal } from '../components/repositories/EnvironmentsModal';
+import { RepositorySelectorModal } from '../components/repositories/RepositorySelectorModal';
 import { Callout } from '../components/ui/Callout';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -38,7 +38,8 @@ export function RepositoriesView() {
     removeLocal,
   } = useRepositories();
 
-  const [addMode, setAddMode] = useState<'local' | 'clone' | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectorMode, setSelectorMode] = useState<'selector' | 'add' | 'clone'>('selector');
   const [editOpen, setEditOpen] = useState(false);
   const [branchEnvironment, setBranchEnvironment] = useState<EnvironmentState | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -136,7 +137,7 @@ export function RepositoriesView() {
   }
 
   function handleCreated(repository: RepositoryDetail) {
-    setAddMode(null);
+    setSelectorOpen(false);
     applyDetail(repository);
     toast.success('Repositorio agregado', {
       description: `${repository.configuredCount} de ${repository.environments.length} ambientes detectados automáticamente.`,
@@ -171,122 +172,134 @@ export function RepositoriesView() {
   }
 
   return (
-    <div className="repositories">
-      {items.length === 0 ? (
-        <RepositoryOnboarding
-          demo={demo}
-          onAdd={() => setAddMode('local')}
-          onClone={() => setAddMode('clone')}
-        />
-      ) : (
-        <div className="repositories-layout">
-          <aside className="surface repo-list-panel" aria-label="Repositorios">
-            <header className="repo-list-head">
-              <div className="repo-list-heading">
-                <h2 className="surface-title">
-                  Repositorios
-                  <span className="repo-list-count">{items.length}</span>
-                </h2>
-                <p className="surface-subtitle">
-                  {items.length === 1
-                    ? '1 repositorio conectado'
-                    : `${items.length} repositorios conectados`}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-icon btn-secondary"
-                aria-label="Agregar repositorio"
-                title="Agregar repositorio"
-                onClick={() => setAddMode('local')}
-              >
-                <Icon name="plus" size={15} />
-              </button>
-            </header>
-
-            <div className="repo-list">
-              {items.map((item) => (
-                <RepositoryListItem
-                  key={item.id}
-                  repository={item}
-                  active={item.id === selectedId}
-                  onSelect={() => select(item.id)}
-                />
-              ))}
-            </div>
-
-            <footer className="repo-list-footer">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setAddMode('clone')}
-              >
-                <Icon name="plus" size={13} />
-                Clonar otro repositorio
-              </button>
-            </footer>
-          </aside>
-
+    <>
+      <div className="repositories">
+        {items.length === 0 ? (
+          <RepositoryOnboarding
+            demo={demo}
+            onAdd={() => {
+              setSelectorMode('add');
+              setSelectorOpen(true);
+            }}
+            onClone={() => {
+              setSelectorMode('clone');
+              setSelectorOpen(true);
+            }}
+          />
+        ) : (
           <section className="repo-detail-area" aria-live="polite">
-            {detailLoading && !detail ? (
-              <div className="surface loading-panel">
-                <Spinner size="md" label="Leyendo ramas…" />
-              </div>
-            ) : detail ? (
-              <RepositoryDetailPanel
-                repository={detail}
-                fetching={fetching}
-                detecting={detecting}
-                resettingEnvironment={resettingEnvironment}
-                onFetch={() => void handleFetch()}
-                onDetect={() => void handleDetect()}
-                onOpenFolder={() => void handleOpenFolder()}
-                onEdit={() => setEditOpen(true)}
-                onRemove={() => setRemoveOpen(true)}
-                onChangeEnvironment={setBranchEnvironment}
-                onResetAuto={(environment) => void handleResetAuto(environment)}
-                onManageEnvironments={() => setEnvironmentsOpen(true)}
-              />
-            ) : detailError ? (
-              <div className="surface">
-                <EmptyState
-                  icon={<Icon name="alert" size={26} />}
-                  title="No pudimos leer este repositorio"
-                  description={detailError.message}
-                  action={
-                    selectedId ? (
+              {detailLoading && !detail ? (
+                <div className="surface loading-panel">
+                  <Spinner size="md" label="Leyendo ramas…" />
+                </div>
+              ) : detail ? (
+                <RepositoryDetailPanel
+                  repository={detail}
+                  fetching={fetching}
+                  detecting={detecting}
+                  resettingEnvironment={resettingEnvironment}
+                  repositoriesCount={items.length}
+                  onFetch={() => void handleFetch()}
+                  onDetect={() => void handleDetect()}
+                  onOpenFolder={() => void handleOpenFolder()}
+                  onEdit={() => setEditOpen(true)}
+                  onRemove={() => setRemoveOpen(true)}
+                  onChangeRepository={() => {
+                    setSelectorMode('selector');
+                    setSelectorOpen(true);
+                  }}
+                  onAddLocal={() => {
+                    setSelectorMode('add');
+                    setSelectorOpen(true);
+                  }}
+                  onClone={() => {
+                    setSelectorMode('clone');
+                    setSelectorOpen(true);
+                  }}
+                  onChangeEnvironment={setBranchEnvironment}
+                  onResetAuto={(environment) => void handleResetAuto(environment)}
+                  onManageEnvironments={() => setEnvironmentsOpen(true)}
+                />
+              ) : detailError ? (
+                <div className="surface">
+                  <EmptyState
+                    icon={<Icon name="alert" size={26} />}
+                    title="No pudimos leer este repositorio"
+                    description={detailError.message}
+                    action={
+                      selectedId ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => select(selectedId)}
+                        >
+                          <Icon name="refresh" size={14} />
+                          Reintentar
+                        </button>
+                      ) : null
+                    }
+                  />
+                </div>
+              ) : items.length > 0 && selectedId ? (
+                <div className="surface">
+                  <EmptyState
+                    icon={<Icon name="branch" size={26} />}
+                    title="Repositorio no encontrado"
+                    description="El repositorio seleccionado ya no está disponible."
+                    action={
                       <button
                         type="button"
                         className="btn btn-primary"
-                        onClick={() => select(selectedId)}
+                        onClick={() => {
+                          setSelectorMode('selector');
+                          setSelectorOpen(true);
+                        }}
                       >
-                        <Icon name="refresh" size={14} />
-                        Reintentar
+                        <Icon name="list" size={14} />
+                        Elegir otro repositorio
                       </button>
-                    ) : null
-                  }
-                />
-              </div>
-            ) : (
-              <div className="surface">
-                <EmptyState
-                  icon={<Icon name="branch" size={26} />}
-                  title="Selecciona un repositorio"
-                  description="Elige uno de la lista para revisar sus ramas y ambientes."
-                />
-              </div>
-            )}
-          </section>
+                    }
+                  />
+                </div>
+              ) : items.length > 0 ? (
+                <div className="surface">
+                  <EmptyState
+                    icon={<Icon name="list" size={26} />}
+                    title="Elige un repositorio"
+                    description="Selecciona uno de tus repositorios para ver su detalle."
+                    action={
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          setSelectorMode('selector');
+                          setSelectorOpen(true);
+                        }}
+                      >
+                        <Icon name="list" size={14} />
+                        Abrir selector
+                      </button>
+                    }
+                  />
+                </div>
+              ) : null}
+            </section>
+          )}
         </div>
-      )}
 
-      {addMode ? (
-        <AddRepositoryModal
-          initialMode={addMode}
-          onClose={() => setAddMode(null)}
+      {selectorOpen && (
+        <RepositorySelectorModal
+          open={selectorOpen}
+          onClose={() => setSelectorOpen(false)}
+          repositories={items}
+          onSelect={(id) => {
+            select(id);
+            setSelectorOpen(false);
+          }}
           onCreated={handleCreated}
+          mode={selectorMode}
         />
-      ) : null}
+      )}
 
       {editOpen && detail ? (
         <EditRepositoryModal
@@ -336,66 +349,11 @@ export function RepositoriesView() {
           onChanged={() => void refresh()}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
-// ─── Lista ──────────────────────────────────────────────────────────────────
 
-interface RepositoryListItemProps {
-  repository: RepositorySummary;
-  active: boolean;
-  onSelect: () => void;
-}
-
-function RepositoryListItem({
-  repository,
-  active,
-  onSelect,
-}: RepositoryListItemProps) {
-  const hasWarning = repository.warnings.length > 0;
-
-  return (
-    <button
-      type="button"
-      className={`repo-card ${active ? 'is-active' : ''}`}
-      aria-current={active ? 'true' : undefined}
-      onClick={onSelect}
-    >
-      <span className="repo-card-top">
-        <span className="repo-card-avatar" aria-hidden="true">
-          {repository.name.slice(0, 1).toUpperCase()}
-        </span>
-        <span className="repo-card-name" title={repository.name}>
-          {repository.name}
-        </span>
-        {hasWarning ? (
-          <span className="repo-card-warning" title="Revisa las advertencias">
-            <Icon name="alert" size={13} />
-          </span>
-        ) : null}
-      </span>
-      <span className="repo-card-path" title={repository.localPath}>
-        {truncateMiddle(repository.localPath, 42)}
-      </span>
-      <span className="repo-card-meta">
-        <span>base {repository.baseBranch}</span>
-        <span className="repo-card-sep">·</span>
-        <span>{repository.configuredCount}/{repository.environments.length} ambientes</span>
-      </span>
-      <span className="repo-env-dots" aria-label="Estado de ambientes">
-        {repository.environments.map((environment) => (
-          <span
-            key={environment.environment}
-            className={`env-dot ${environment.available ? '' : 'is-missing'}`}
-            style={environment.available ? { background: environment.color } : undefined}
-            title={`${environment.label}: ${environment.branchName ?? 'sin configurar'}`}
-          />
-        ))}
-      </span>
-    </button>
-  );
-}
 
 // ─── Detalle ────────────────────────────────────────────────────────────────
 
@@ -404,11 +362,15 @@ interface RepositoryDetailPanelProps {
   fetching: boolean;
   detecting: boolean;
   resettingEnvironment: string | null;
+  repositoriesCount: number;
   onFetch: () => void;
   onDetect: () => void;
   onOpenFolder: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  onChangeRepository: () => void;
+  onAddLocal: () => void;
+  onClone: () => void;
   onChangeEnvironment: (environment: EnvironmentState) => void;
   onResetAuto: (environment: EnvironmentState) => void;
   onManageEnvironments: () => void;
@@ -419,17 +381,63 @@ function RepositoryDetailPanel({
   fetching,
   detecting,
   resettingEnvironment,
+  repositoriesCount,
   onFetch,
   onDetect,
   onOpenFolder,
   onEdit,
   onRemove,
+  onChangeRepository,
+  onAddLocal,
+  onClone,
   onChangeEnvironment,
   onResetAuto,
   onManageEnvironments,
 }: RepositoryDetailPanelProps) {
   return (
     <div className="repo-detail">
+      <div className="repo-detail-header">
+        <div className="repo-detail-header-info">
+          <div className="repo-detail-header-title">
+            <Icon name="branch" size={18} />
+            <div>
+              <h2>Repositorio actual</h2>
+              <p className="repo-detail-header-subtitle">
+                {repositoriesCount === 1
+                  ? '1 repositorio conectado'
+                  : `${repositoriesCount} repositorios conectados`}
+              </p>
+            </div>
+          </div>
+          <div className="repo-detail-header-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onChangeRepository}
+            >
+              <Icon name="list" size={14} />
+              Cambiar repositorio
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onAddLocal}
+            >
+              <Icon name="folder" size={14} />
+              Agregar local
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onClone}
+            >
+              <Icon name="terminal" size={14} />
+              Clonar
+            </button>
+          </div>
+        </div>
+      </div>
+
       <article className="surface repo-detail-head">
         <div className="repo-detail-title">
           <span className="repo-detail-avatar" aria-hidden="true">
