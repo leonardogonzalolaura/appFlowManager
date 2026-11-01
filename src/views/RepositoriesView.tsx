@@ -182,9 +182,16 @@ export function RepositoriesView() {
         <div className="repositories-layout">
           <aside className="surface repo-list-panel" aria-label="Repositorios">
             <header className="repo-list-head">
-              <div>
-                <h2 className="surface-title">Repositorios</h2>
-                <p className="surface-subtitle">{items.length} configurado(s)</p>
+              <div className="repo-list-heading">
+                <h2 className="surface-title">
+                  Repositorios
+                  <span className="repo-list-count">{items.length}</span>
+                </h2>
+                <p className="surface-subtitle">
+                  {items.length === 1
+                    ? '1 repositorio conectado'
+                    : `${items.length} repositorios conectados`}
+                </p>
               </div>
               <button
                 type="button"
@@ -425,22 +432,27 @@ function RepositoryDetailPanel({
     <div className="repo-detail">
       <article className="surface repo-detail-head">
         <div className="repo-detail-title">
-          <div className="repo-title-row">
-            <h2>{repository.name}</h2>
-            <StatusChip tone="neutral">
-              {repository.provider === 'github' ? 'GitHub' : 'Git'}
-            </StatusChip>
-            {repository.pathWarning ? (
-              <StatusChip tone="warning">OneDrive</StatusChip>
-            ) : null}
+          <span className="repo-detail-avatar" aria-hidden="true">
+            {repository.name.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="repo-detail-title-copy">
+            <div className="repo-title-row">
+              <h2>{repository.name}</h2>
+              <StatusChip tone="neutral">
+                {repository.provider === 'github' ? 'GitHub' : 'Git'}
+              </StatusChip>
+              {repository.pathWarning ? (
+                <StatusChip tone="warning">OneDrive</StatusChip>
+              ) : null}
+            </div>
+            <p className="repo-remote" title={repository.remoteUrl ?? ''}>
+              <Icon name="branch" size={13} />
+              {repository.remoteUrl ?? 'Sin remoto configurado'}
+            </p>
+            <p className="repo-local-path" title={repository.localPath}>
+              {repository.localPath}
+            </p>
           </div>
-          <p className="repo-remote" title={repository.remoteUrl ?? ''}>
-            <Icon name="branch" size={13} />
-            {repository.remoteUrl ?? 'Sin remoto configurado'}
-          </p>
-          <p className="repo-local-path" title={repository.localPath}>
-            {repository.localPath}
-          </p>
         </div>
 
         <div className="repo-detail-actions">
@@ -483,21 +495,35 @@ function RepositoryDetailPanel({
         </div>
       </article>
 
-      <div className="repo-stats">
-        <div className="repo-stat">
-          <span className="repo-stat-label">Rama base</span>
+      <div className="repo-stats" role="list" aria-label="Resumen del repositorio">
+        <div className="repo-stat" role="listitem">
+          <span className="repo-stat-label">
+            <Icon name="branch" size={12} />
+            Rama base
+          </span>
           <code className="repo-stat-value">{repository.baseBranch}</code>
         </div>
-        <div className="repo-stat">
-          <span className="repo-stat-label">Ramas</span>
+        <div className="repo-stat" role="listitem">
+          <span className="repo-stat-label">
+            <Icon name="list" size={12} />
+            Ramas
+          </span>
           <strong className="repo-stat-value">{repository.branches.length}</strong>
         </div>
-        <div className="repo-stat">
-          <span className="repo-stat-label">Ambientes</span>
-          <strong className="repo-stat-value">{repository.configuredCount}/{repository.environments.length}</strong>
+        <div className="repo-stat" role="listitem">
+          <span className="repo-stat-label">
+            <Icon name="layers" size={12} />
+            Ambientes
+          </span>
+          <strong className="repo-stat-value">
+            {repository.configuredCount}/{repository.environments.length}
+          </strong>
         </div>
-        <div className="repo-stat">
-          <span className="repo-stat-label">Último fetch</span>
+        <div className="repo-stat" role="listitem">
+          <span className="repo-stat-label">
+            <Icon name="clock" size={12} />
+            Último fetch
+          </span>
           <span className="repo-stat-value repo-stat-date">
             {repository.lastFetchedAt ? formatDateTime(repository.lastFetchedAt) : 'Nunca'}
           </span>
@@ -555,6 +581,11 @@ function RepositoryDetailPanel({
               key={environment.environment}
               className={`env-card ${environment.available ? '' : 'is-missing'}`}
               role="listitem"
+              style={
+                environment.available
+                  ? { borderLeftColor: withAlpha(environment.color, 0.55) }
+                  : undefined
+              }
             >
               <div className="env-card-main">
                 <span

@@ -182,7 +182,7 @@ export function SettingsView({
               Estos valores se podrán editar en las siguientes fases.
             </p>
           </div>
-          <StatusChip tone="neutral">Próximamente</StatusChip>
+          
         </header>
 
         <div className="preference-list">
