@@ -212,7 +212,8 @@
 }
 
 .req-table tbody tr.is-archived td {
-  opacity: 0.55;
+  opacity: 0.80;
+  background: rgba(120, 120, 120, 0.15);
 }
 
 .req-key {

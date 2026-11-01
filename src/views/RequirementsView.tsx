@@ -619,7 +619,7 @@ export function RequirementsView() {
                 setPage(1);
               }}
             />
-            <span>Ver archivados</span>
+            <span>Incluir requerimientos archivados</span>
           </label>
         </div>
       </section>
