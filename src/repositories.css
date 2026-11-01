@@ -641,6 +641,13 @@ code.repo-stat-value {
   background: linear-gradient(90deg, rgba(245, 184, 75, 0.035), transparent 60%);
 }
 
+.env-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .env-badge {
   display: inline-flex;
   align-items: center;

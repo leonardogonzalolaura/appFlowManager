@@ -1,10 +1,19 @@
 export interface PhaseInfo {
   phase: string;
   title: string;
+  /** Etiqueta corta para espacios reducidos (por ejemplo, el sidebar). */
+  shortTitle?: string;
   summary: string;
   bullets: string[];
   status: 'done' | 'current' | 'next';
 }
+
+/** Fase ya entregada que la app toma como referencia. */
+export const CURRENT_PHASE = 'Fase 6';
+/** Fase en la que se está trabajando. */
+export const NEXT_PHASE = 'Fase 7';
+/** Fases planificadas en el roadmap (sin contar la fase futura). */
+export const TOTAL_PHASES = 8;
 
 export const PHASE_INFO: Record<string, PhaseInfo> = {
   'Fase 1': {
@@ -75,6 +84,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
   'Fase 6': {
     phase: 'Fase 6',
     title: 'Scripts de base de datos',
+    shortTitle: 'Scripts BD',
     summary:
       'Ordena los scripts que acompañan cada requerimiento y ejecútalos con control.',
     bullets: [
@@ -82,6 +92,32 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Scripts ordenados, con editor SQL y checksum.',
       'Ejecución con confirmación, salida en vivo y detención ante error.',
       'Alerta clara y opción de omitir cuando no hay conexión configurada.',
+    ],
+    status: 'next',
+  },
+  'Fase 7': {
+    phase: 'Fase 7',
+    title: 'Estado por ambiente e historial',
+    summary:
+      'Consulta en qué ambiente vive cada requerimiento y reanuda los lotes con reintentos.',
+    bullets: [
+      'Evaluador de presencia por Git, PR e historial de despliegues.',
+      'Matriz por repositorio, chips multi-repo y refresco manual.',
+      'Pantalla de lotes con reanudación y reintentos.',
+      'El merge en GitHub se refleja como QAS 3/3.',
+    ],
+    status: 'next',
+  },
+  'Fase 8': {
+    phase: 'Fase 8',
+    title: 'Endurecimiento y entrega',
+    summary:
+      'Cierra la app con pruebas de extremo a extremo, accesibilidad y empaquetado.',
+    bullets: [
+      'Pruebas E2E manuales, manejo de errores, accesibilidad y rendimiento con 10k requerimientos.',
+      'Empaquetado NSIS/MSI, iconos y workflow de release.',
+      'Documentación de usuario y troubleshooting.',
+      'Instalador y checklist de aceptación completo.',
     ],
     status: 'next',
   },

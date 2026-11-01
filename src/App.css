@@ -169,7 +169,7 @@ code {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 30px 34px;
+  padding: 0 30px 20px;
 }
 
 .content > * {
@@ -177,6 +177,30 @@ code {
   max-width: 1240px;
   margin-left: auto;
   margin-right: auto;
+}
+
+.content-footer {
+  flex-shrink: 0;
+  padding: 6px 30px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-size: 9.5px;
+  user-select: none;
+}
+
+.content-footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+
+.content-footer-sep {
+  opacity: 0.5;
 }
 
 /* ==========================================================================
@@ -1333,20 +1357,6 @@ code {
   color: var(--text-secondary);
 }
 
-.content-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 4px 0 2px;
-  color: var(--text-muted);
-  font-size: 9.5px;
-}
-
-.content-footer-sep {
-  opacity: 0.5;
-}
-
 /* ==========================================================================
    Settings
    ========================================================================== */
@@ -2175,7 +2185,11 @@ code {
   }
 
   .content {
-    padding: 0 20px 26px;
+    padding: 0 20px 18px;
+  }
+
+  .content-footer {
+    padding: 6px 20px;
   }
 
   .next-milestone {
@@ -2205,6 +2219,11 @@ code {
 
   .diagnostic-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .content-footer-inner {
+    flex-wrap: wrap;
+    row-gap: 2px;
   }
 
   .details-list {

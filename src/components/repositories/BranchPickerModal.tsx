@@ -33,6 +33,7 @@ export function BranchPickerModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
+  console.log(repository)
   const otherUsage = useMemo(() => {
     const usage = new Map<string, string>();
     repository.environments.forEach((item) => {
@@ -92,6 +93,7 @@ export function BranchPickerModal({
       size="lg"
       icon={<Icon name="branch" size={20} />}
       badge={
+        <span className="env-badge-group">
         <span
           className="env-badge"
           style={{
@@ -102,6 +104,17 @@ export function BranchPickerModal({
         >
           {environment.label}
         </span>
+        <span
+          className="branch-name"
+          style={{
+            color: environment.color,
+            backgroundColor: withAlpha(environment.color, 0.12),
+            borderColor: withAlpha(environment.color, 0.35),
+          }}
+        >
+          {repository.name}
+        </span>
+       </span>   
       }
       onClose={busy ? () => undefined : onClose}
       closeOnBackdrop={!busy}

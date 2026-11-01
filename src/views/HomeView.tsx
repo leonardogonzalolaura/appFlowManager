@@ -1,4 +1,5 @@
 import { buildChecklist, setupProgress } from '../lib/setup';
+import { CURRENT_PHASE, NEXT_PHASE, PHASE_INFO } from '../lib/phases';
 import type { ApiError, SystemInfo } from '../types';
 import { SetupChecklist } from '../components/onboarding/SetupChecklist';
 import { SystemPanel } from '../components/onboarding/SystemPanel';
@@ -77,7 +78,7 @@ export function HomeView({
         <div className="welcome-copy">
           <div className="hero-kicker">
             <Icon name="sparkles" size={13} />
-            Fase 4 · Squash y conflictos
+            
           </div>
           <h2 className="hero-title">
             Tu centro de mando para desplegar con calma.
@@ -206,31 +207,22 @@ export function HomeView({
         </div>
         <div className="next-milestone-body">
           <div className="next-milestone-head">
-            <h2>Siguiente hito: rama de despliegue y push</h2>
-            <StatusChip tone="info">Fase 5</StatusChip>
+            <h2>Siguiente hito: {PHASE_INFO[NEXT_PHASE].title}</h2>
           </div>
           <p>
-            Aplica el squash sobre una rama hija del ambiente, empuja solo esa rama y
-            deja el merge para GitHub.
+            Cada merge en GitHub se refleja como QAS 3/3, con reanudación de lotes
+            y reintentos desde una sola pantalla.
           </p>
         </div>
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => onOpenPhase('Fase 5')}
+          onClick={() => onOpenPhase(NEXT_PHASE)}
         >
-          Ver Fase 5
+          Ver
           <Icon name="arrow-right" size={14} />
         </button>
       </section>
-
-      <footer className="content-footer">
-        <span>FlowManager v{info.appVersion}</span>
-        <span className="content-footer-sep">·</span>
-        <span>{info.os} {info.arch}</span>
-        <span className="content-footer-sep">·</span>
-        <span>Fase 4 de 8</span>
-      </footer>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Icon, type IconName } from '../ui/Icon';
+import { CURRENT_PHASE, PHASE_INFO } from '../../lib/phases';
 import type { ViewId } from '../../types';
 
 interface SidebarProps {
@@ -115,7 +116,10 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="sidebar-footer-badge">MVP</span>
-        <span>Fase 6 · Scripts BD</span>
+        <span>
+          {CURRENT_PHASE} ·{' '}
+          {PHASE_INFO[CURRENT_PHASE].shortTitle ?? PHASE_INFO[CURRENT_PHASE].title}
+        </span>
       </div>
     </aside>
   );

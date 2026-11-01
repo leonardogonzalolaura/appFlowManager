@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ContentFooter } from './components/layout/ContentFooter';
 import { Sidebar } from './components/layout/Sidebar';
 import { TitleBar } from './components/layout/TitleBar';
 import { TopBar } from './components/layout/TopBar';
@@ -209,6 +210,8 @@ function App() {
               </div>
             )}
           </div>
+
+          <ContentFooter info={info} />
         </main>
       </div>
 
