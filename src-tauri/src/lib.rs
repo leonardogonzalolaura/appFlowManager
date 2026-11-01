@@ -103,6 +103,7 @@ pub fn run() {
             commands::squash::deployment_push,
             commands::squash::deployment_batches_list,
             commands::squash::deployment_batch_sessions,
+            commands::presence::environment_status,
             commands::database::db_connections_list,
             commands::database::db_connections_upsert,
             commands::database::db_connections_delete,

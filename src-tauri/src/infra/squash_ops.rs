@@ -289,6 +289,37 @@ pub fn changed_files(
         .collect())
 }
 
+/// Archivos que difieren entre dos revisiones ignorando espacios y líneas en
+/// blanco. Sirve para saber si un commit solo aporta ruido de formato.
+pub fn changed_files_ignoring_space(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "diff".to_string(),
+            "--name-only".to_string(),
+            "-z".to_string(),
+            "--ignore-all-space".to_string(),
+            "--ignore-blank-lines".to_string(),
+            format!("{from}..{to}"),
+        ],
+        Duration::from_secs(60),
+    )?;
+    if !run.success {
+        return Ok(Vec::new());
+    }
+    Ok(run
+        .stdout
+        .split('\0')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// SHA del blob de `path` en `rev`, o None si el archivo no existe allí.
 pub fn blob_id(
     repo_path: &Path,
@@ -359,8 +390,10 @@ pub fn conflict_marker_files(worktree: &Path) -> Result<Vec<String>, AppError> {
     Ok(files)
 }
 
-/// Indica si el índice agrega cambios reales (no solo líneas en blanco o
-/// espacios). Evita crear commits vacíos al resolver un conflicto.
+/// Indica si el índice agrega cambios además de líneas **completamente
+/// vacías**. Evita crear commits con solo líneas en blanco (típico al borrar
+/// marcadores de conflicto) sin descartar cambios reales: un espacio dentro de
+/// un string o un cambio de indentación sí cuentan.
 pub fn has_meaningful_staged_changes(worktree: &Path) -> Result<bool, AppError> {
     let run = run_git(
         Some(worktree),
@@ -368,7 +401,6 @@ pub fn has_meaningful_staged_changes(worktree: &Path) -> Result<bool, AppError> 
             "diff".to_string(),
             "--cached".to_string(),
             "--numstat".to_string(),
-            "--ignore-all-space".to_string(),
             "--ignore-blank-lines".to_string(),
         ],
         Duration::from_secs(30),
@@ -462,6 +494,113 @@ pub fn commit_meta(repo_path: &Path, sha: &str) -> Result<(i64, String), AppErro
         .unwrap_or(0);
     let summary = parts.next().unwrap_or("").trim().to_string();
     Ok((timestamp, summary))
+}
+
+/// `true` si `ancestor` ya está contenido en `descendant`. Es la evidencia
+/// más fuerte de que un commit llegó al ambiente sin squash de por medio.
+pub fn is_ancestor(
+    repo_path: &Path,
+    ancestor: &str,
+    descendant: &str,
+) -> Result<bool, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "merge-base".to_string(),
+            "--is-ancestor".to_string(),
+            ancestor.to_string(),
+            descendant.to_string(),
+        ],
+        Duration::from_secs(30),
+    )?;
+    Ok(run.success)
+}
+
+/// Subconjunto de `paths` cuyo contenido difiere entre `from` y `to`.
+/// Una sola llamada a Git aunque la lista tenga decenas de archivos.
+pub fn differing_files(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+    paths: &[String],
+) -> Result<Vec<String>, AppError> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec![
+        "diff".to_string(),
+        "--name-only".to_string(),
+        "-z".to_string(),
+        "--no-renames".to_string(),
+        from.to_string(),
+        to.to_string(),
+        "--".to_string(),
+    ];
+    args.extend(paths.iter().cloned());
+    let run = run_git(Some(repo_path), &args, Duration::from_secs(60))?;
+    if !run.success {
+        return Err(AppError::GitFailed(run.stderr));
+    }
+    Ok(run
+        .stdout
+        .split('\0')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// Mapa `refname -> sha` de todas las referencias locales. Permite resolver
+/// muchas ramas con una sola invocación de Git.
+pub fn ref_map(repo_path: &Path) -> Result<std::collections::HashMap<String, String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "for-each-ref".to_string(),
+            "--format=%(refname)%09%(objectname)".to_string(),
+        ],
+        Duration::from_secs(30),
+    )?;
+    let mut map = std::collections::HashMap::new();
+    if !run.success {
+        return Ok(map);
+    }
+    for line in run.stdout.lines() {
+        let Some((name, sha)) = line.split_once('\t') else {
+            continue;
+        };
+        map.insert(name.trim().to_string(), sha.trim().to_string());
+    }
+    Ok(map)
+}
+
+/// Archivos que difieren entre `head` y el punto donde se separó de `base`
+/// (equivalente a `git diff --name-only base...head`). Una sola invocación.
+pub fn changed_files_since_merge_base(
+    repo_path: &Path,
+    base: &str,
+    head: &str,
+) -> Result<Vec<String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "diff".to_string(),
+            "--name-only".to_string(),
+            "-z".to_string(),
+            format!("{base}...{head}"),
+        ],
+        Duration::from_secs(60),
+    )?;
+    if !run.success {
+        return Ok(Vec::new());
+    }
+    Ok(run
+        .stdout
+        .split('\0')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 pub fn worktree_exists(path: &Path) -> bool {

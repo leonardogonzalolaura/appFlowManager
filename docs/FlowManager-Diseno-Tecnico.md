@@ -2843,8 +2843,13 @@ Al final de cada fase: demo, tests verdes, documento actualizado y tu confirmaci
 - Estadísticas separadas: `files_changed/additions/deletions` describen el **squash**; `deploy_files_changed/deploy_additions/deploy_deletions` (migración `0010`) describen el **commit real de la rama hija** sobre el ambiente. La UI muestra “Archivos rama hija” para que no parezca que se perdieron archivos.
 - `deployment_report({ sessionId })` explica el delta: archivos que toca el squash, archivos que ya son idénticos en la rama del ambiente (no generan cambios en la rama hija) y archivos que realmente agrega el commit de despliegue. Es el caso típico cuando el ambiente ya contiene parte del trabajo del requerimiento.
 - Resolución de conflictos asistida: `squash_resolve_conflict({ sessionId, filePath, side })` con `side=ours` (versión del ambiente) o `side=theirs` (versión del requerimiento) hace `git checkout --ours|--theirs` + `git add`, sin pasar por un editor externo.
-- Guardas al continuar: se bloquea si quedan marcadores de conflicto (`<<<<<<<`, `=======`, `>>>>>>>`) en el índice y, si la resolución solo agrega líneas en blanco/espacios, la sesión termina como `no_changes` en lugar de crear un commit vacío.
-- Pruebas: 46 Rust (incluye apply, push real a remoto bare, base drift, guard de ambiente, rama libre durante conflicto, continue con HEAD detached, agrupación de lotes, reporte de archivos ya presentes, bloqueo por marcadores y resolución sin cambios netos) y 11 frontend.
+- Guarda de rama avanzada: al unificar se guarda el tip de cada rama del requerimiento en `plan_json.actions[].sha`; al crear la rama hija se compara con el tip actual y, si cambió, se bloquea con un mensaje que pide volver a preparar. Así un commit nuevo nunca queda fuera de la rama hija en silencio.
+- Si la rama hija local ya existe, `deployment_apply` responde `BRANCH_EXISTS_LOCAL` y la UI ofrece eliminarla y crearla de nuevo (`replaceExisting: true`). Solo se borra la rama local; el remoto y el ambiente no se tocan.
+- `deployment_push` acepta commits agregados a la rama hija después de crearla, siempre que sean descendientes del commit preparado (fast-forward). En ese caso actualiza `deploy_sha` y las estadísticas de la rama hija antes de empujar. Si la rama divergió del commit preparado, se rechaza el push.
+- Los cambios de espacios que no son líneas vacías (por ejemplo un espacio dentro de un string literal) sí se incluyen al crear la rama hija. `deployment_report` devuelve `whitespaceOnlyFiles` y la UI advierte cuando Git solo ve diferencias de espacios, para que el usuario decida antes de empujar.
+- En la resolución de conflictos los botones dicen **Usar ambiente** / **Usar mi rama** y el texto explica que cada uno descarta la versión contraria en ese archivo.
+- Guardas al continuar: se bloquea si quedan marcadores de conflicto (`<<<<<<<`, `=======`, `>>>>>>>`) en el índice. Si el índice solo agrega líneas **completamente vacías**, la sesión queda como `no_changes` para no crear commits basura (caso típico al borrar marcadores a mano). Cualquier otro cambio —incluido un espacio al final de una línea o una indentación— sí crea el commit de la rama hija.
+- Pruebas: 54 Rust (incluye apply, push real a remoto bare, base drift, guard de ambiente, rama libre durante conflicto, continue con HEAD detached, agrupación de lotes, reporte de archivos ya presentes, bloqueo por marcadores, resolución sin cambios netos, bloqueo cuando la rama del requerimiento avanzó, reemplazo de rama local existente y push con commits nuevos sobre la rama hija) y 11 frontend.
 - Pendiente para completar la visión extendida: estado de PR vía GitHub API y push multi-repo paralelo.
 
 ### Fase 6 - Scripts BD y conexiones (4-5 días)
@@ -2872,6 +2877,22 @@ Al final de cada fase: demo, tests verdes, documento actualizado y tu confirmaci
 - Matriz por repo, chips multi-repo, refresh.
 - Pantalla de lotes, reanudación, reintentos.
 - **Salida:** merge en GitHub reflejado como `QAS 3/3`.
+
+#### 16.7.1 Implementación MVP entregada
+
+- `environment_status({ requirementIds })` devuelve, por requerimiento, cada repositorio y cada ambiente activo del catálogo.
+- La comparación es **por contenido, no por SHA**: un squash merge genera commits nuevos, así que preguntar “¿existe este commit en la rama?” daría falsos negativos casi siempre.
+- Cálculo:
+  1. Archivos propios del requerimiento con `git diff --name-only <base>...<rama>` (una sola llamada; excluye commits que ya estaban en la base).
+  2. Resolución de ramas con `git for-each-ref` (una llamada por repositorio). La rama del requerimiento prioriza la copia local; las ramas de ambiente priorizan `origin/`.
+  3. Por ambiente, `git diff --name-only <rama> <ambiente> -- <archivos>`: lo que no difiere ya está aplicado.
+- Estados: `applied` (todos los archivos coinciden), `partial` (algunos), `pending` (ninguno), `no_changes` (la rama no aporta archivos) y `unknown` (rama no encontrada o ambiente sin rama configurada).
+- Evidencia: `ancestry` cuando la rama del requerimiento o la rama hija empujada ya es ancestro del ambiente; `content` cuando coincide el contenido sin ancestría; `none` cuando no hay datos.
+- Historial: la última sesión de despliegue por requerimiento/repositorio/ambiente aporta la rama hija empujada y la fecha; se muestra con `↑` en el chip.
+- Rendimiento: evaluación en paralelo por repositorio (`spawn_blocking`) y datos de historial en una sola consulta. Caso real: 5 repositorios × 6 ambientes en ~1.2 s.
+- UI: chips por repositorio en el detalle del requerimiento (`DEV 7/8`, `QAS 1/1`, `PRD 0/1`), con tooltip que incluye rama, archivos pendientes y último push. Botón **Ambientes** para recalcular.
+- Pruebas: 54 Rust (incluye detección aplicado/parcial/pendiente y archivos propios frente a la base) y 11 frontend.
+- Pendiente de esta fase: estado de PR vía GitHub API (requiere token), reintentos y reanudación en la pantalla de lotes, y caché con TTL para evitar recalcular al abrir el detalle repetidamente.
 
 ### Fase 8 — Endurecimiento y entrega (3-4 días)
 

@@ -296,6 +296,15 @@
   border-color: color-mix(in srgb, var(--green) 35%, var(--border));
 }
 
+.deployment-report.is-whitespace {
+  border-color: var(--yellow-border);
+  background: var(--yellow-soft);
+}
+
+.deployment-report.is-whitespace .deployment-report-summary > svg {
+  color: var(--yellow);
+}
+
 .deployment-report-summary {
   display: flex;
   align-items: flex-start;

@@ -75,6 +75,10 @@ export function DeploymentWizardModal({
   const [error, setError] = useState<ApiError | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [branchConflict, setBranchConflict] = useState<{
+    session: SquashSession;
+    branch: string;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -214,11 +218,14 @@ export function DeploymentWizardModal({
     }
   }
 
-  async function apply(session: SquashSession): Promise<SquashSession | null> {
+  async function apply(
+    session: SquashSession,
+    replaceExisting = false,
+  ): Promise<SquashSession | null> {
     setSessionBusy(session.id, 'apply');
     setError(null);
     try {
-      const updated = await applyDeployment(session.id);
+      const updated = await applyDeployment(session.id, replaceExisting);
       updateSession(updated);
       onChanged();
       if (updated.status === 'conflict') {
@@ -236,9 +243,14 @@ export function DeploymentWizardModal({
       }
       return updated;
     } catch (caught) {
-      setError(normalizeError(caught));
+      const apiError = normalizeError(caught);
+      if (apiError.code === 'BRANCH_EXISTS_LOCAL' && !replaceExisting) {
+        setBranchConflict({ session, branch: expectedDeployBranch(session) });
+        return null;
+      }
+      setError(apiError);
       toast.error('No se pudo crear la rama hija', {
-        description: normalizeError(caught).message,
+        description: apiError.message,
       });
       return null;
     } finally {
@@ -781,6 +793,7 @@ export function DeploymentWizardModal({
               onContinue={() => void handleContinue(session)}
               onRefresh={() => void handleRefresh(session)}
               onAbort={() => void handleAbort(session)}
+              onReprepare={() => void restartPreparation()}
               onOpenEditor={(file) => void handleOpenEditor(session, file)}
               onOpenTaruGit={() => void handleOpenTaruGit(session)}
               onOpenFolder={() => void handleOpenFolder(session)}
@@ -812,6 +825,21 @@ export function DeploymentWizardModal({
             </Callout>
           ) : null}
 
+          {branchConflict ? (
+            <ConfirmModal
+              title="La rama local ya existe"
+              message={`La rama '${branchConflict.branch}' ya existe en tu equipo. ¿La elimino y creo la nueva desde ${branchConflict.session.targetBranch ?? 'el ambiente'}? No se toca el remoto ni el ambiente.`}
+              confirmLabel="Eliminar y crear"
+              tone="danger"
+              onConfirm={() => {
+                const session = branchConflict.session;
+                setBranchConflict(null);
+                void apply(session, true);
+              }}
+              onClose={() => setBranchConflict(null)}
+            />
+          ) : null}
+
           {confirmCancel ? (
             <ConfirmModal
               title="Cancelar despliegue"
@@ -841,6 +869,7 @@ interface DeploymentSessionCardProps {
   onContinue: () => void;
   onRefresh: () => void;
   onAbort: () => void;
+  onReprepare: () => void;
   onOpenEditor: (file?: string) => void;
   onOpenTaruGit: () => void;
   onOpenFolder: () => void;
@@ -859,6 +888,7 @@ function DeploymentSessionCard({
   onContinue,
   onRefresh,
   onAbort,
+  onReprepare,
   onOpenEditor,
   onOpenTaruGit,
   onOpenFolder,
@@ -881,6 +911,11 @@ function DeploymentSessionCard({
     ? report?.deletions ?? session.deployDeletions
     : session.deletions;
   const alreadyInEnvironment = report?.alreadyInEnvironment ?? [];
+  const whitespaceOnlyFiles = report?.whitespaceOnlyFiles ?? [];
+  const onlyWhitespace =
+    hasDeployCommit &&
+    whitespaceOnlyFiles.length > 0 &&
+    whitespaceOnlyFiles.length === (report?.deployFiles.length ?? 0);
 
   return (
     <article
@@ -986,6 +1021,32 @@ function DeploymentSessionCard({
         </div>
       ) : null}
 
+      {hasDeployCommit && whitespaceOnlyFiles.length > 0 ? (
+        <div className="deployment-report is-whitespace">
+          <div className="deployment-report-summary">
+            <Icon name="alert" size={13} />
+            <span>
+              {onlyWhitespace
+                ? 'Según Git, la rama hija solo cambia espacios o líneas en blanco en '
+                : 'Además de los cambios reales, estos archivos solo cambian espacios o líneas en blanco: '}
+              <strong>{whitespaceOnlyFiles.length}</strong> archivo(s). Revisa el diff
+              antes de empujar: un espacio dentro de un string puede cambiar el
+              comportamiento.
+            </span>
+          </div>
+          <details>
+            <summary>Ver archivos con solo espacios en blanco</summary>
+            <ul>
+              {whitespaceOnlyFiles.map((file) => (
+                <li key={file}>
+                  <code title={file}>{truncateMiddle(file, 96)}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      ) : null}
+
       {conflict ? (
         <>
           <Callout
@@ -1010,9 +1071,10 @@ function DeploymentSessionCard({
             {session.phase === 'deploy'
               ? 'El squash chocó con cambios ya presentes en la rama del ambiente.'
               : 'El squash chocó con cambios entre las ramas de los requerimientos.'}{' '}
-            Resuelve cada archivo con <strong>Ambiente</strong> o{' '}
-            <strong>Requerimiento</strong>, o ábrelo en el editor y guarda la versión
-            final. FlowManager no deja continuar si quedan marcadores. La rama{' '}
+            Por archivo elige <strong>Usar ambiente</strong> (descarta el cambio de tu
+            rama en ese archivo) o <strong>Usar mi rama</strong> (descarta el del
+            ambiente), o abre el editor y guarda la versión final. FlowManager no deja
+            continuar si quedan marcadores. La rama{' '}
             <code>{expectedDeployBranch(session)}</code> ya está libre, pero el conflicto
             vive en este worktree: resuélvelo aquí y no cambies esa rama en el clon
             principal.
@@ -1091,7 +1153,7 @@ function DeploymentSessionCard({
                         : 'Quedarse con la versión base del squash en este archivo'
                     }
                   >
-                    {session.phase === 'deploy' ? 'Ambiente' : 'Base'}
+                    {session.phase === 'deploy' ? 'Usar ambiente' : 'Usar base'}
                   </button>
                   <button
                     type="button"
@@ -1100,7 +1162,7 @@ function DeploymentSessionCard({
                     disabled={busy}
                     title="Usar la versión del requerimiento y descartar la del ambiente en este archivo"
                   >
-                    Requerimiento
+                    Usar mi rama
                   </button>
                   <button
                     type="button"
@@ -1270,10 +1332,34 @@ function DeploymentSessionCard({
       ) : session.status === 'no_changes' ? (
         <>
           <Callout tone="warning" title="Sin cambios netos en el ambiente">
-            El ambiente ya contenía estos cambios. No se creó una rama nueva.
+            {report && report.squashFiles.length > 0 ? (
+              <>
+                El squash tocó <strong>{report.squashFiles.length}</strong> archivo(s),
+                pero <strong>{alreadyInEnvironment.length}</strong> ya eran idénticos en{' '}
+                <code>{session.targetBranch}</code>. No se creó una rama hija.
+              </>
+            ) : (
+              <>
+                La rama no aporta archivos respecto de{' '}
+                <code>{session.baseBranch}</code>.
+              </>
+            )}
+            {session.phase === 'deploy' ? (
+              <> Si agregaste commits después de unificar los cambios, vuelve a preparar
+                el despliegue para incluirlos.</>
+            ) : null}
           </Callout>
           <div className="squash-conflict-actions">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onAbort}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onReprepare}
+              disabled={busy}
+            >
+              <Icon name="refresh" size={13} />
+              Volver a preparar
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onAbort}>
               Limpiar sesión
             </button>
           </div>

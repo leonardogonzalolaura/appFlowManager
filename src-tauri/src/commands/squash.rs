@@ -164,6 +164,8 @@ pub struct DeploymentReport {
     pub already_in_environment: Vec<String>,
     /// Archivos que realmente agrega el commit de la rama hija.
     pub deploy_files: Vec<String>,
+    /// Archivos de la rama hija que solo cambian espacios o líneas en blanco.
+    pub whitespace_only_files: Vec<String>,
     pub additions: i64,
     pub deletions: i64,
 }
@@ -471,11 +473,16 @@ async fn prepare_squash(
     let actions = if strategy == "all_commits" {
         mappings
             .iter()
-            .map(|mapping| SquashAction {
+            .enumerate()
+            .map(|(index, mapping)| SquashAction {
                 kind: "merge".into(),
                 label: mapping.external_key.clone(),
                 branch: Some(mapping.branch_name.clone()),
-                sha: None,
+                // Guardamos el tip de la rama al unificar: si luego se agregan
+                // commits, la rama hija no debe salir con el squash viejo.
+                sha: analyses
+                    .get(index)
+                    .and_then(|analysis| analysis.branch_sha.clone()),
             })
             .collect::<Vec<_>>()
     } else {
@@ -757,9 +764,10 @@ async fn cleanup_session(pool: &SqlitePool, session: &SquashSession) {
 pub async fn deployment_apply(
     state: State<'_, AppState>,
     session_id: String,
+    replace_existing: Option<bool>,
 ) -> Result<SquashSession, ApiError> {
     let pool = state.pool()?;
-    apply_deployment(pool, &session_id).await
+    apply_deployment_with(pool, &session_id, replace_existing.unwrap_or(false)).await
 }
 
 /// Explica el delta real de una sesión de despliegue: qué archivos toca el
@@ -784,6 +792,7 @@ fn build_deployment_report(
         squash_files: Vec::new(),
         already_in_environment: Vec::new(),
         deploy_files: Vec::new(),
+        whitespace_only_files: Vec::new(),
         additions: 0,
         deletions: 0,
     };
@@ -808,6 +817,14 @@ fn build_deployment_report(
     if let Some(deploy_sha) = session.deploy_sha.as_deref() {
         report.deploy_files =
             squash_ops::changed_files(repo_path, &target_base, deploy_sha)?;
+        let meaningful =
+            squash_ops::changed_files_ignoring_space(repo_path, &target_base, deploy_sha)?;
+        report.whitespace_only_files = report
+            .deploy_files
+            .iter()
+            .filter(|file| !meaningful.iter().any(|kept| kept == *file))
+            .cloned()
+            .collect();
         let (_, additions, deletions) =
             squash_ops::diff_stat_between(repo_path, &target_base, deploy_sha)?;
         report.additions = additions as i64;
@@ -816,9 +833,55 @@ fn build_deployment_report(
     Ok(report)
 }
 
+/// Rechaza aplicar un squash preparado antes de que la rama del requerimiento
+/// recibiera nuevos commits: la rama hija saldría sin ellos y parecería que
+/// FlowManager "no reconoce" el trabajo reciente.
+fn ensure_requirement_branches_current(
+    repo: &RepoRow,
+    plan: &SquashPlan,
+) -> Result<(), AppError> {
+    let repo_path = Path::new(&repo.local_path);
+    for action in &plan.actions {
+        if action.kind != "merge" {
+            continue;
+        }
+        let (Some(branch), Some(expected)) = (action.branch.as_deref(), action.sha.as_deref())
+        else {
+            continue;
+        };
+        let current = squash_ops::rev_parse(repo_path, &format!("refs/heads/{branch}"))?
+            .or(squash_ops::rev_parse(
+                repo_path,
+                &format!("refs/remotes/{}/{branch}", repo.remote_name),
+            )?);
+        if let Some(current) = current {
+            if current != expected {
+                return Err(AppError::Validation(format!(
+                    "La rama '{branch}' tiene commits nuevos desde que unificaste los cambios ({} → {}). Vuelve a preparar el despliegue para incluirlos.",
+                    short_sha(expected),
+                    short_sha(&current)
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
 async fn apply_deployment(
     pool: &SqlitePool,
     session_id: &str,
+) -> Result<SquashSession, ApiError> {
+    apply_deployment_with(pool, session_id, false).await
+}
+
+async fn apply_deployment_with(
+    pool: &SqlitePool,
+    session_id: &str,
+    replace_existing: bool,
 ) -> Result<SquashSession, ApiError> {
     let session = load_session(pool, session_id).await?;
     if session.phase == "deploy" && session.status == "ready" {
@@ -855,6 +918,11 @@ async fn apply_deployment(
         .into());
     };
     let repo = load_repo(pool, &session.repository_id).await?;
+
+    // Si la rama del requerimiento recibió commits nuevos, el squash guardado
+    // ya no la representa: la rama hija saldría incompleta.
+    let plan = parse_plan(&session.plan_json);
+    ensure_requirement_branches_current(&repo, &plan)?;
 
     if repo.remote_url.is_some() {
         let run = git_cli::fetch_base(
@@ -908,10 +976,21 @@ async fn apply_deployment(
     )?
     .is_some()
     {
-        return Err(AppError::Validation(format!(
-            "La rama local '{deploy_branch}' ya existe. Elimínala o usa otra sesión."
-        ))
-        .into());
+        if !replace_existing {
+            return Err(AppError::BranchExistsLocal(format!(
+                "La rama local '{deploy_branch}' ya existe. Puedes eliminarla y crear la nueva sin tocar el remoto."
+            ))
+            .into());
+        }
+        let run = git_cli::delete_local_branch(Path::new(&repo.local_path), &deploy_branch)?;
+        if !run.success {
+            let detail = git_cli::invalidate_run(&run, "No se pudo eliminar la rama local")
+                .to_string();
+            return Err(AppError::Validation(format!(
+                "No se pudo eliminar la rama local '{deploy_branch}'. Probablemente está abierta en el clon principal: cambia a otra rama ahí y vuelve a intentar. {detail}"
+            ))
+            .into());
+        }
     }
 
     let worktree = Path::new(&session.worktree_path);
@@ -1116,14 +1195,46 @@ async fn push_deployment(
     }
 
     let repo_path = Path::new(&repo.local_path);
-    let local_sha =
-        squash_ops::rev_parse(repo_path, &format!("refs/heads/{deploy_branch}"))?;
-    if local_sha.as_deref() != Some(deploy_sha.as_str()) {
+    let Some(local_sha) =
+        squash_ops::rev_parse(repo_path, &format!("refs/heads/{deploy_branch}"))?
+    else {
         return Err(AppError::PushRejected(format!(
-            "La rama local '{deploy_branch}' ya no apunta al commit preparado. Si la abriste en otra herramienta y tiene cambios nuevos, empújala desde allí o vuelve a preparar el despliegue."
+            "La rama local '{deploy_branch}' no existe. Vuelve a crear la rama hija desde el despliegue."
         ))
         .into());
-    }
+    };
+
+    // Permite commits añadidos después de crear la rama, siempre que sean
+    // descendientes del commit preparado (fast-forward). Si divergió, no se
+    // sobrescribe nada.
+    let push_sha = if local_sha != deploy_sha {
+        if !squash_ops::is_ancestor(repo_path, &deploy_sha, &local_sha)? {
+            return Err(AppError::PushRejected(format!(
+                "La rama local '{deploy_branch}' divergió del commit preparado. Revisa los commits o vuelve a preparar el despliegue."
+            ))
+            .into());
+        }
+        if let Some(target_base) = session.target_base_sha.as_deref() {
+            let (files, additions, deletions) =
+                squash_ops::diff_stat_between(repo_path, target_base, &local_sha)?;
+            sqlx::query(
+                "UPDATE squash_sessions SET deploy_sha = ?1, deploy_files_changed = ?2,
+                    deploy_additions = ?3, deploy_deletions = ?4, updated_at = ?5
+                 WHERE id = ?6",
+            )
+            .bind(&local_sha)
+            .bind(files as i64)
+            .bind(additions as i64)
+            .bind(deletions as i64)
+            .bind(now())
+            .bind(&session.id)
+            .execute(pool)
+            .await?;
+        }
+        local_sha
+    } else {
+        local_sha
+    };
 
     let remote_sha = git_cli::remote_branch_sha(
         repo_path,
@@ -1131,23 +1242,27 @@ async fn push_deployment(
         &deploy_branch,
     )?;
     if let Some(remote_sha) = remote_sha {
-        if remote_sha != deploy_sha {
-            return Err(AppError::PushRejected(format!(
-                "La rama '{deploy_branch}' ya existe en {} con otro SHA. No se sobrescribe; renómbrala o elimínala manualmente.",
-                repo.remote_name
-            ))
-            .into());
+        if remote_sha != push_sha {
+            // Si el remoto es un ancestro, es un avance normal (fast-forward).
+            if !squash_ops::is_ancestor(repo_path, &remote_sha, &push_sha)? {
+                return Err(AppError::PushRejected(format!(
+                    "La rama '{deploy_branch}' ya existe en {} con otro SHA. No se sobrescribe; renómbrala o elimínala manualmente.",
+                    repo.remote_name
+                ))
+                .into());
+            }
+        } else {
+            mark_pushed(pool, &session.id, &push_sha).await?;
+            release_worktree_if_attached(&session, &push_sha);
+            return Ok(load_session(pool, &session.id).await?.into_dto());
         }
-        mark_pushed(pool, &session.id, &deploy_sha).await?;
-        release_worktree_if_attached(&session, &deploy_sha);
-        return Ok(load_session(pool, &session.id).await?.into_dto());
     }
 
     let run = git_cli::push_branch_at(
         repo_path,
         &repo.remote_name,
         &deploy_branch,
-        &deploy_sha,
+        &push_sha,
     )?;
     if !run.success {
         return Err(git_cli::invalidate_run(&run, "No se pudo empujar la rama").into());
@@ -1157,14 +1272,14 @@ async fn push_deployment(
         &repo.remote_name,
         &deploy_branch,
     )?;
-    if verified.as_deref() != Some(deploy_sha.as_str()) {
+    if verified.as_deref() != Some(push_sha.as_str()) {
         return Err(AppError::PushRejected(
             "El SHA remoto no coincide con el commit preparado.".into(),
         )
         .into());
     }
-    mark_pushed(pool, &session.id, &deploy_sha).await?;
-    release_worktree_if_attached(&session, &deploy_sha);
+    mark_pushed(pool, &session.id, &push_sha).await?;
+    release_worktree_if_attached(&session, &push_sha);
     Ok(load_session(pool, &session.id).await?.into_dto())
 }
 
@@ -2323,10 +2438,6 @@ mod tests {
         builder.write().expect("write tree")
     }
 
-    fn tree_with(repo: &Repository, parent: Option<Oid>, file: &str) -> Oid {
-        tree_with_content(repo, parent, file, &format!("{file}\n"))
-    }
-
     fn commit_content(
         repo: &Repository,
         branch: &str,
@@ -2646,6 +2757,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deployment_push_includes_commits_added_to_child_branch() {
+        let (dir, pool, repo_path) = setup_deployment(true).await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        let applied = apply_deployment(&pool, &prepared.id).await.expect("apply");
+        let deploy_sha = applied.deploy_sha.clone().expect("deploy sha");
+
+        // El usuario agrega un commit sobre la rama hija antes de empujar.
+        let repo = Repository::open(&repo_path).expect("repo");
+        let extra = commit_on(
+            &repo,
+            "BPIM-1-dev",
+            Some(deploy_sha.parse::<Oid>().expect("oid")),
+            "extra.txt",
+            "extra commit",
+        );
+
+        let pushed = push_deployment(&pool, &applied.id).await.expect("push");
+        assert_eq!(pushed.deploy_sha.as_deref(), Some(extra.to_string().as_str()));
+        assert_eq!(pushed.pushed_sha.as_deref(), Some(extra.to_string().as_str()));
+        assert_eq!(pushed.deploy_files_changed, 2);
+
+        let bare = Repository::open(dir.path().join("remote.git")).expect("bare");
+        let reference = bare
+            .find_reference("refs/heads/BPIM-1-dev")
+            .expect("remote deploy branch");
+        assert_eq!(reference.target().unwrap().to_string(), extra.to_string());
+
+        cleanup_session(&pool, &pushed).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_can_replace_existing_local_branch() {
+        let (dir, pool, repo_path) = setup_deployment(false).await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+
+        // Simula una rama local que quedó de un intento anterior.
+        let repo = Repository::open(&repo_path).expect("repo");
+        let main = repo
+            .find_reference("refs/heads/main")
+            .expect("main")
+            .target()
+            .expect("main sha");
+        commit_on(&repo, "BPIM-1-dev", Some(main), "leftover.txt", "leftover");
+
+        let error = apply_deployment(&pool, &prepared.id)
+            .await
+            .expect_err("la rama existente debe avisar");
+        assert_eq!(error.code, "BRANCH_EXISTS_LOCAL");
+
+        let applied = apply_deployment_with(&pool, &prepared.id, true)
+            .await
+            .expect("reemplazar rama");
+        assert_eq!(applied.status, "ready");
+        assert_eq!(applied.deploy_branch.as_deref(), Some("BPIM-1-dev"));
+
+        let applied_sha = applied.deploy_sha.clone().expect("deploy sha");
+        let commit = repo
+            .find_commit(applied_sha.parse::<Oid>().expect("oid"))
+            .expect("commit");
+        assert!(
+            commit
+                .tree()
+                .expect("tree")
+                .get_path(Path::new("leftover.txt"))
+                .is_err(),
+            "el contenido viejo no debe sobrevivir"
+        );
+
+        cleanup_session(&pool, &applied).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn deployment_refuses_when_environment_branch_moved() {
         let (dir, pool, repo_path) = setup_deployment(false).await;
         let worktrees = dir.path().join("worktrees");
@@ -2673,6 +2878,45 @@ mod tests {
             .await
             .expect_err("drift must fail");
         assert_eq!(error.code, "BASE_DRIFT");
+        cleanup_session(&pool, &prepared).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_refuses_when_requirement_branch_gained_commits() {
+        let (dir, pool, repo_path) = setup_deployment(false).await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+
+        let repo = Repository::open(&repo_path).expect("open");
+        let feature = repo
+            .find_reference("refs/heads/feature/BPIM-1")
+            .expect("feature")
+            .target()
+            .expect("feature sha");
+        commit_on(
+            &repo,
+            "feature/BPIM-1",
+            Some(feature),
+            "late.txt",
+            "late commit",
+        );
+
+        let error = apply_deployment(&pool, &prepared.id)
+            .await
+            .expect_err("la rama que avanzó debe bloquear el despliegue");
+        assert_eq!(error.code, "VALIDATION");
+        assert!(error.message.contains("commits nuevos"));
+
         cleanup_session(&pool, &prepared).await;
         pool.close().await;
     }
@@ -2756,7 +3000,8 @@ mod tests {
         assert_eq!(applied.status, "conflict");
 
         let worktree = Path::new(&applied.worktree_path);
-        // La resolución solo agrega una línea en blanco: no hay cambio real.
+        // La resolución solo agrega una línea completamente vacía: no hay
+        // contenido nuevo, así que no se crea un commit vacío.
         std::fs::write(worktree.join("README.md"), "# dev\n\n").expect("resolve file");
         let staged = squash_ops::stage_file(worktree, "README.md").expect("stage");
         assert!(staged.success);
@@ -2776,6 +3021,51 @@ mod tests {
         .expect("local ref")
         .expect("local branch");
         assert_eq!(Some(local), continued.target_base_sha);
+
+        cleanup_session(&pool, &continued).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_trailing_space_resolution_creates_branch() {
+        let (dir, pool, repo_path) = setup_conflict_deployment().await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        let applied = apply_deployment(&pool, &prepared.id)
+            .await
+            .expect("apply conflict");
+        assert_eq!(applied.status, "conflict");
+
+        let worktree = Path::new(&applied.worktree_path);
+        // Un espacio al final puede cambiar el comportamiento (por ejemplo
+        // dentro de un string): no debe tratarse como "sin cambios".
+        std::fs::write(worktree.join("README.md"), "# dev \n").expect("resolve file");
+        let staged = squash_ops::stage_file(worktree, "README.md").expect("stage");
+        assert!(staged.success);
+
+        let continued = continue_squash(&pool, &applied.id)
+            .await
+            .expect("continue");
+        assert_eq!(continued.status, "ready");
+        assert_eq!(continued.deploy_files_changed, 1);
+        assert_eq!(continued.deploy_additions, 1);
+
+        let local = squash_ops::rev_parse(
+            Path::new(&repo_path),
+            "refs/heads/BPIM-1-dev",
+        )
+        .expect("local ref")
+        .expect("local branch");
+        assert_ne!(Some(local), continued.target_base_sha);
 
         cleanup_session(&pool, &continued).await;
         pool.close().await;

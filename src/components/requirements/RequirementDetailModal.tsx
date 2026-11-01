@@ -3,6 +3,7 @@ import { normalizeError } from '../../lib/api';
 import { analyzeRequirementBranches } from '../../lib/branches';
 import { formatDateTime } from '../../lib/format';
 import { listDbScripts } from '../../lib/database';
+import { getEnvironmentStatus } from '../../lib/presence';
 import {
   getRequirement,
   unassignRequirementRepository,
@@ -12,8 +13,10 @@ import type {
   ApiError,
   BranchOperationResult,
   DbScriptSummary,
+  EnvironmentPresence,
   RepositoryBranchAnalysis,
   RequirementDetail,
+  RequirementPresence,
   RequirementRepositoryMapping,
 } from '../../types';
 import { BranchAnalysisModal } from './BranchAnalysisModal';
@@ -58,6 +61,22 @@ export function RequirementDetailModal({
   const [scriptsLoading, setScriptsLoading] = useState(true);
   const [infoOpen, setInfoOpen] = useState(false);
   const [subitemsOpen, setSubitemsOpen] = useState<boolean | null>(null);
+  const [presence, setPresence] = useState<RequirementPresence | null>(null);
+  const [presenceLoading, setPresenceLoading] = useState(false);
+  const [presenceError, setPresenceError] = useState<string | null>(null);
+
+  async function loadPresence() {
+    setPresenceLoading(true);
+    try {
+      const [loaded] = await getEnvironmentStatus([requirementId]);
+      setPresence(loaded ?? null);
+      setPresenceError(null);
+    } catch (caught) {
+      setPresenceError(normalizeError(caught).message);
+    } finally {
+      setPresenceLoading(false);
+    }
+  }
 
   async function loadScripts() {
     setScriptsLoading(true);
@@ -78,6 +97,7 @@ export function RequirementDetailModal({
       setNotes(loaded.notes ?? '');
       setError(null);
       void loadScripts();
+      void loadPresence();
     } catch (caught) {
       setError(normalizeError(caught));
     } finally {
@@ -88,6 +108,8 @@ export function RequirementDetailModal({
   useEffect(() => {
     setInfoOpen(false);
     setSubitemsOpen(null);
+    setPresence(null);
+    setPresenceError(null);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirementId]);
@@ -305,95 +327,132 @@ export function RequirementDetailModal({
                   Repositorios{' '}
                   <span className="req-section-count">{detail.repositories.length}</span>
                 </h3>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setAssignOpen(true)}
-                >
-                  <Icon name="plus" size={13} />
-                  Asignar repositorio
-                </button>
+                <div className="req-section-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    title="Recalcular el estado de cada ambiente"
+                    onClick={() => void loadPresence()}
+                    disabled={presenceLoading}
+                  >
+                    {presenceLoading ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <Icon name="refresh" size={13} />
+                    )}
+                    Ambientes
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setAssignOpen(true)}
+                  >
+                    <Icon name="plus" size={13} />
+                    Asignar repositorio
+                  </button>
+                </div>
               </div>
+              {presenceError ? (
+                <p className="req-presence-note">
+                  <Icon name="alert" size={12} /> {presenceError}
+                </p>
+              ) : null}
               {detail.repositories.length === 0 ? (
                 <p className="req-empty-line">
                   Este requerimiento todavía no está mapeado a ningún repositorio.
                 </p>
               ) : (
                 <div className="req-repo-list">
-                  {detail.repositories.map((repository) => (
-                    <div key={repository.id} className="req-repo-item">
-                      <span className="req-repo-icon">
-                        <Icon name="branch" size={14} />
-                      </span>
-                      <span className="req-repo-copy">
-                        <strong>{repository.name}</strong>
-                        <small title={repository.localPath}>
-                          {repository.localPath}
-                        </small>
-                        <small className="req-branch-meta">
-                          base {repository.baseBranch}
-                          {repository.lastAnalyzedAt
-                            ? ` · analizada ${formatDateTime(repository.lastAnalyzedAt)}`
-                            : ''}
-                        </small>
-                      </span>
-                      <code className="branch-name">{repository.branchName}</code>
-                      <StatusChip tone={branchStatusTone(repository.branchStatus)}>
-                        {branchStatusLabel(repository.branchStatus)}
-                      </StatusChip>
-                      <div className="req-repo-actions">
-                        {repository.branchStatus === 'planned' ||
-                        repository.branchStatus === 'missing' ? (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => setBranchMapping(repository)}
-                          >
-                            <Icon name="branch" size={13} />
-                            Crear rama
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-icon btn-ghost btn-xs"
-                            aria-label={`Gestionar rama de ${repository.name}`}
-                            title="Conservar o recrear rama"
-                            onClick={() => setBranchMapping(repository)}
-                          >
-                            <Icon name="branch" size={13} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-icon btn-ghost btn-xs"
-                          aria-label={`Analizar rama de ${repository.name}`}
-                          title="Analizar commits y archivos"
-                          onClick={() => void analyzeBranch(repository)}
-                          disabled={analyzingRepo === repository.repositoryId}
-                        >
-                          {analyzingRepo === repository.repositoryId ? (
-                            <Spinner size="sm" />
-                          ) : (
-                            <Icon name="terminal" size={13} />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-icon btn-ghost btn-xs req-repo-remove"
-                          aria-label={`Desasignar ${repository.name}`}
-                          title="Desasignar"
-                          onClick={() => void unassign(repository.repositoryId, repository.name)}
-                          disabled={unassigning === repository.repositoryId}
-                        >
-                          {unassigning === repository.repositoryId ? (
-                            <Spinner size="sm" />
-                          ) : (
-                            <Icon name="x" size={13} />
-                          )}
-                        </button>
+                  {detail.repositories.map((repository) => {
+                    const repoPresence = presence?.repositories.find(
+                      (item) => item.repositoryId === repository.repositoryId,
+                    );
+                    return (
+                      <div key={repository.id} className="req-repo-block">
+                        <div className="req-repo-item">
+                          <span className="req-repo-icon">
+                            <Icon name="branch" size={14} />
+                          </span>
+                          <span className="req-repo-copy">
+                            <strong>{repository.name}</strong>
+                            <small title={repository.localPath}>
+                              {repository.localPath}
+                            </small>
+                            <small className="req-branch-meta">
+                              base {repository.baseBranch}
+                              {repository.lastAnalyzedAt
+                                ? ` · analizada ${formatDateTime(repository.lastAnalyzedAt)}`
+                                : ''}
+                            </small>
+                          </span>
+                          <code className="branch-name">{repository.branchName}</code>
+                          <StatusChip tone={branchStatusTone(repository.branchStatus)}>
+                            {branchStatusLabel(repository.branchStatus)}
+                          </StatusChip>
+                          <div className="req-repo-actions">
+                            {repository.branchStatus === 'planned' ||
+                            repository.branchStatus === 'missing' ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setBranchMapping(repository)}
+                              >
+                                <Icon name="branch" size={13} />
+                                Crear rama
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-icon btn-ghost btn-xs"
+                                aria-label={`Gestionar rama de ${repository.name}`}
+                                title="Conservar o recrear rama"
+                                onClick={() => setBranchMapping(repository)}
+                              >
+                                <Icon name="branch" size={13} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-icon btn-ghost btn-xs"
+                              aria-label={`Analizar rama de ${repository.name}`}
+                              title="Analizar commits y archivos"
+                              onClick={() => void analyzeBranch(repository)}
+                              disabled={analyzingRepo === repository.repositoryId}
+                            >
+                              {analyzingRepo === repository.repositoryId ? (
+                                <Spinner size="sm" />
+                              ) : (
+                                <Icon name="terminal" size={13} />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-icon btn-ghost btn-xs req-repo-remove"
+                              aria-label={`Desasignar ${repository.name}`}
+                              title="Desasignar"
+                              onClick={() =>
+                                void unassign(repository.repositoryId, repository.name)
+                              }
+                              disabled={unassigning === repository.repositoryId}
+                            >
+                              {unassigning === repository.repositoryId ? (
+                                <Spinner size="sm" />
+                              ) : (
+                                <Icon name="x" size={13} />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                        {repoPresence && repoPresence.environments.length > 0 ? (
+                          <div className="req-env-matrix">
+                            {repoPresence.environments.map((env) => (
+                              <EnvPresenceChip key={env.environment} env={env} />
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -654,6 +713,59 @@ function branchStatusLabel(status: string): string {
     default:
       return 'Planificada';
   }
+}
+
+const PRESENCE_LABEL: Record<EnvironmentPresence['status'], string> = {
+  applied: 'aplicado',
+  partial: 'parcial',
+  pending: 'pendiente',
+  unknown: 'sin datos',
+  no_changes: 'sin cambios',
+};
+
+function presenceTooltip(env: EnvironmentPresence): string {
+  const lines = [env.detail ?? PRESENCE_LABEL[env.status]];
+  if (env.branch) lines.push(`Rama: ${env.branch}`);
+  if (env.evidence === 'ancestry') {
+    lines.push('Evidencia: el commit ya está en la rama del ambiente.');
+  } else if (env.evidence === 'content') {
+    lines.push('Evidencia: comparación de contenido entre ramas.');
+  }
+  if (env.pushedAt) {
+    lines.push(
+      `Última rama hija empujada: ${env.pushedBranch ?? '—'} (${formatDateTime(env.pushedAt)})`,
+    );
+  }
+  if (env.pendingFiles.length > 0) {
+    const shown = env.pendingFiles.slice(0, 6);
+    lines.push(
+      `Faltan: ${shown.join(', ')}${env.pendingFiles.length > shown.length ? '…' : ''}`,
+    );
+  }
+  return lines.join('\n');
+}
+
+function EnvPresenceChip({ env }: { env: EnvironmentPresence }) {
+  const counter =
+    env.status === 'no_changes'
+      ? '—'
+      : env.status === 'unknown'
+        ? '?'
+        : `${env.filesApplied}/${env.filesTotal}`;
+  return (
+    <span
+      className={`req-env-chip is-${env.status}`}
+      title={presenceTooltip(env)}
+    >
+      <span
+        className="req-env-dot"
+        style={env.color ? { background: env.color } : undefined}
+      />
+      <strong>{env.label}</strong>
+      <em>{counter}</em>
+      {env.pushedAt ? <span className="req-env-pushed">↑</span> : null}
+    </span>
+  );
 }
 
 function DetailField({

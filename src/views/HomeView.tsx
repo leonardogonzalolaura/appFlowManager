@@ -1,5 +1,5 @@
 import { buildChecklist, setupProgress } from '../lib/setup';
-import { CURRENT_PHASE, NEXT_PHASE, PHASE_INFO } from '../lib/phases';
+import { NEXT_PHASE, PHASE_INFO } from '../lib/phases';
 import type { ApiError, SystemInfo } from '../types';
 import { SetupChecklist } from '../components/onboarding/SetupChecklist';
 import { SystemPanel } from '../components/onboarding/SystemPanel';

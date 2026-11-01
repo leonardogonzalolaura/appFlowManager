@@ -37,9 +37,12 @@ export async function prepareDeployment(
   });
 }
 
-export async function applyDeployment(sessionId: string): Promise<SquashSession> {
+export async function applyDeployment(
+  sessionId: string,
+  replaceExisting = false,
+): Promise<SquashSession> {
   requireDesktop();
-  return invoke<SquashSession>('deployment_apply', { sessionId });
+  return invoke<SquashSession>('deployment_apply', { sessionId, replaceExisting });
 }
 
 export async function getDeploymentReport(

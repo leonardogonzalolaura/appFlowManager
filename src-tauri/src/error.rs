@@ -51,6 +51,9 @@ pub enum AppError {
     #[error("{0}")]
     BranchExistsRemote(String),
 
+    #[error("{0}")]
+    BranchExistsLocal(String),
+
     #[error("Hay una operación activa sobre el repositorio: {0}")]
     RepoBusy(String),
 
@@ -113,6 +116,7 @@ impl AppError {
             AppError::EnvBranchNotFound(_) => "ENV_BRANCH_NOT_FOUND",
             AppError::BranchNotFound(_) => "BRANCH_NOT_FOUND",
             AppError::BranchExistsRemote(_) => "BRANCH_EXISTS_REMOTE",
+            AppError::BranchExistsLocal(_) => "BRANCH_EXISTS_LOCAL",
             AppError::RepoBusy(_) => "REPO_BUSY",
             AppError::EnvironmentExists(_) => "ENV_EXISTS",
             AppError::EnvironmentNotFound(_) => "ENV_NOT_FOUND",
@@ -156,6 +160,7 @@ impl AppError {
             AppError::EnvBranchNotFound(detail) => Some(detail.clone()),
             AppError::BranchNotFound(detail) => Some(detail.clone()),
             AppError::BranchExistsRemote(detail) => Some(detail.clone()),
+            AppError::BranchExistsLocal(detail) => Some(detail.clone()),
             AppError::RepoBusy(detail) => Some(detail.clone()),
             AppError::EnvironmentExists(detail) => Some(detail.clone()),
             AppError::EnvironmentNotFound(detail) => Some(detail.clone()),

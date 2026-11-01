@@ -373,6 +373,7 @@ export interface DeploymentReport {
   squashFiles: string[];
   alreadyInEnvironment: string[];
   deployFiles: string[];
+  whitespaceOnlyFiles: string[];
   additions: number;
   deletions: number;
 }
@@ -412,6 +413,43 @@ export interface DeploymentPreview {
   requirementCount: number;
   commonRepositoryCount: number;
   unmappedRequirements: SquashRequirementRef[];
+}
+
+export type EnvironmentPresenceStatus =
+  | 'applied'
+  | 'partial'
+  | 'pending'
+  | 'unknown'
+  | 'no_changes';
+
+export interface EnvironmentPresence {
+  environment: string;
+  label: string;
+  color: string | null;
+  branch: string | null;
+  status: EnvironmentPresenceStatus;
+  filesTotal: number;
+  filesApplied: number;
+  filesPending: number;
+  evidence: 'ancestry' | 'content' | 'none';
+  pendingFiles: string[];
+  pushedAt: string | null;
+  pushedBranch: string | null;
+  detail: string | null;
+}
+
+export interface RepositoryPresence {
+  repositoryId: string;
+  repositoryName: string;
+  branchName: string;
+  branchStatus: string;
+  environments: EnvironmentPresence[];
+}
+
+export interface RequirementPresence {
+  requirementId: string;
+  externalKey: string;
+  repositories: RepositoryPresence[];
 }
 
 export interface DeploymentBatchSummary {
