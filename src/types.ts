@@ -452,6 +452,11 @@ export interface RequirementPresence {
   repositories: RepositoryPresence[];
 }
 
+export interface AppSettings {
+  baseBranch: string;
+  manualKeyPrefix: string;
+}
+
 export interface DeploymentBatchSummary {
   batchId: string;
   environment: string | null;

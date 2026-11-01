@@ -47,7 +47,8 @@ describe('buildChecklist', () => {
     expect(items[1].phase).toBe('Fase 1');
     expect(items[2].available).toBe(true);
     expect(items[2].phase).toBe('Fase 2');
-    expect(items[3].available).toBe(false);
+    expect(items[3].available).toBe(true);
+    expect(items[3].phase).toBe('Fase 6');
   });
 
   it('marca pendiente si falta Git', () => {

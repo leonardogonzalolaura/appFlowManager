@@ -72,7 +72,7 @@ export function buildChecklist(info: SystemInfo): ChecklistItem[] {
         'Configura conexiones por ambiente y ordena los scripts que acompañan cada despliegue.',
       phase: 'Fase 6',
       done: setup.databaseConfigured,
-      available: false,
+      available: true,
       detail: setup.databaseConfigured
         ? `${info.counts.databaseConnections} conexión(es) configurada(s)`
         : 'Sin conexiones configuradas.',

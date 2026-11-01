@@ -41,9 +41,9 @@ export function GuideModal({ info, onClose, onGoSettings }: GuideModalProps) {
       title: 'Configura las bases de datos',
       phase: 'Fase 6',
       description:
-        'Cuando llegue el momento de ejecutar scripts, conectarás SQL Server y PostgreSQL por ambiente.',
+        'Conecta SQL Server y PostgreSQL por ambiente, ordena los scripts y ejecútalos con confirmación.',
       done: setup.databaseConfigured,
-      available: false,
+      available: true,
     },
   ];
 

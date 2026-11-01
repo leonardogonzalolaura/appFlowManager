@@ -7,6 +7,7 @@ interface SetupChecklistProps {
   onOpenDiagnostics: () => void;
   onOpenRepositories: () => void;
   onOpenRequirements: () => void;
+  onOpenDatabase: () => void;
   onOpenPhase: (phase: string) => void;
 }
 
@@ -15,6 +16,7 @@ export function SetupChecklist({
   onOpenDiagnostics,
   onOpenRepositories,
   onOpenRequirements,
+  onOpenDatabase,
   onOpenPhase,
 }: SetupChecklistProps) {
   return (
@@ -71,6 +73,15 @@ export function SetupChecklist({
                     onClick={onOpenRequirements}
                   >
                     {item.done ? 'Ver requerimientos' : 'Cargar requerimientos'}
+                    <Icon name="chevron-right" size={13} />
+                  </button>
+                ) : item.id === 'base-datos' ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={onOpenDatabase}
+                  >
+                    {item.done ? 'Revisar conexiones' : 'Configurar base de datos'}
                     <Icon name="chevron-right" size={13} />
                   </button>
                 ) : item.available ? (

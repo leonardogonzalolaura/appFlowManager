@@ -1021,11 +1021,25 @@ async fn add_from_path(
         .unwrap_or(&fallback_name)
         .to_string();
 
+    let configured_base = crate::commands::settings::read_settings(pool)
+        .await
+        .ok()
+        .map(|settings| settings.base_branch)
+        .filter(|value| !value.trim().is_empty());
+
+    let detected_base = if snapshot.default_branch.trim().is_empty() {
+        None
+    } else {
+        Some(snapshot.default_branch.clone())
+    };
+
     let base_branch = base_branch
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(&snapshot.default_branch)
-        .to_string();
+        .map(str::to_string)
+        .or(detected_base)
+        .or(configured_base)
+        .unwrap_or_else(|| "master".to_string());
 
     if !snapshot.branches.is_empty()
         && !snapshot

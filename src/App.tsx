@@ -165,6 +165,7 @@ function App() {
                 onOpenSettings={() => setView('configuracion')}
                 onOpenRepositories={() => setView('repositorios')}
                 onOpenRequirements={() => setView('requerimientos')}
+                onOpenDatabase={() => setView('bases')}
                 onOpenPhase={setPhaseModal}
                 onCopy={(value, label) => void handleCopy(value, label)}
                 onOpenDir={(kind, label) => void handleOpenDir(kind, label)}

@@ -68,3 +68,10 @@ export async function getDeploymentBatchSessions(
   requireDesktop();
   return invoke<SquashSession[]>('deployment_batch_sessions', { batchId });
 }
+
+export async function retryDeploymentBatch(
+  batchId: string,
+): Promise<SquashSession[]> {
+  requireDesktop();
+  return invoke<SquashSession[]>('deployment_batch_retry', { batchId });
+}

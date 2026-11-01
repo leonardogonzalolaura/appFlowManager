@@ -9,9 +9,9 @@ export interface PhaseInfo {
 }
 
 /** Fase ya entregada que la app toma como referencia. */
-export const CURRENT_PHASE = 'Fase 6';
-/** Fase en la que se está trabajando. */
-export const NEXT_PHASE = 'Fase 7';
+export const CURRENT_PHASE = 'Fase 7';
+/** Fase en la que se está trabajando (roadmap opcional). */
+export const NEXT_PHASE = 'Fase 8';
 /** Fases planificadas en el roadmap (sin contar la fase futura). */
 export const TOTAL_PHASES = 8;
 
@@ -27,7 +27,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Override manual por repositorio y validación de la rama base.',
       'Vista de matriz repo × ambiente para revisar todo de un vistazo.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 2': {
     phase: 'Fase 2',
@@ -40,7 +40,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Lista tipo Excel con filtros, incluido "mis requerimientos".',
       'Mapeo de cada requerimiento a uno o varios repositorios.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 3': {
     phase: 'Fase 3',
@@ -53,7 +53,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Alerta y bloqueo cuando una rama no tiene commits.',
       'Comparación entre varios requerimientos del mismo repositorio.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 4': {
     phase: 'Fase 4',
@@ -66,7 +66,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Pausa ante conflictos, apertura en VS Code, staging y continuación.',
       'Worktrees aislados para no tocar tu copia de trabajo.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 5': {
     phase: 'Fase 5',
@@ -79,7 +79,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Guard duro que rechaza cualquier push a dev, qas, uat, prd o release/*.',
       'Enlaces de comparación y PR para que el merge lo hagas tú en GitHub.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 6': {
     phase: 'Fase 6',
@@ -93,7 +93,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Ejecución con confirmación, salida en vivo y detención ante error.',
       'Alerta clara y opción de omitir cuando no hay conexión configurada.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 7': {
     phase: 'Fase 7',
@@ -106,7 +106,7 @@ export const PHASE_INFO: Record<string, PhaseInfo> = {
       'Pantalla de lotes con reanudación y reintentos.',
       'El merge en GitHub se refleja como QAS 3/3.',
     ],
-    status: 'next',
+    status: 'done',
   },
   'Fase 8': {
     phase: 'Fase 8',

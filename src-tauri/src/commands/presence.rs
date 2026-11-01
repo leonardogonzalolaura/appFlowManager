@@ -5,14 +5,28 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::State;
+
+const CACHE_TTL: Duration = Duration::from_secs(90);
+
+struct CachedPresence {
+    at: Instant,
+    value: RequirementPresence,
+}
+
+fn cache() -> &'static Mutex<HashMap<String, CachedPresence>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, CachedPresence>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Estado de un requerimiento en un ambiente concreto.
 ///
 /// La comparación es por **contenido**, no por SHA: un squash merge cambia el
 /// commit, así que preguntar "¿existe este SHA en la rama?" daría falsos
 /// negativos casi siempre.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentPresence {
     pub environment: String,
@@ -32,7 +46,7 @@ pub struct EnvironmentPresence {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryPresence {
     pub repository_id: String,
@@ -42,7 +56,7 @@ pub struct RepositoryPresence {
     pub environments: Vec<EnvironmentPresence>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequirementPresence {
     pub requirement_id: String,
@@ -90,13 +104,44 @@ struct PresenceCounts {
 pub async fn environment_status(
     state: State<'_, AppState>,
     requirement_ids: Vec<String>,
+    force: Option<bool>,
 ) -> Result<Vec<RequirementPresence>, ApiError> {
     let pool = state.pool()?;
+    let force = force.unwrap_or(false);
     let mut result = Vec::new();
     for requirement_id in requirement_ids {
-        result.push(build_requirement_presence(pool, &requirement_id).await?);
+        if !force {
+            if let Some(hit) = cache_lookup(&requirement_id) {
+                result.push(hit);
+                continue;
+            }
+        }
+        let presence = build_requirement_presence(pool, &requirement_id).await?;
+        cache_store(&requirement_id, &presence);
+        result.push(presence);
     }
     Ok(result)
+}
+
+fn cache_lookup(requirement_id: &str) -> Option<RequirementPresence> {
+    let guard = cache().lock().ok()?;
+    let entry = guard.get(requirement_id)?;
+    if entry.at.elapsed() > CACHE_TTL {
+        return None;
+    }
+    Some(entry.value.clone())
+}
+
+fn cache_store(requirement_id: &str, value: &RequirementPresence) {
+    if let Ok(mut guard) = cache().lock() {
+        guard.insert(
+            requirement_id.to_string(),
+            CachedPresence {
+                at: Instant::now(),
+                value: value.clone(),
+            },
+        );
+    }
 }
 
 async fn build_requirement_presence(

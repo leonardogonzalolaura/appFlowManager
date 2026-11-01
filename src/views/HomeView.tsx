@@ -1,5 +1,4 @@
 import { buildChecklist, setupProgress } from '../lib/setup';
-import { NEXT_PHASE, PHASE_INFO } from '../lib/phases';
 import type { ApiError, SystemInfo } from '../types';
 import { SetupChecklist } from '../components/onboarding/SetupChecklist';
 import { SystemPanel } from '../components/onboarding/SystemPanel';
@@ -19,6 +18,7 @@ interface HomeViewProps {
   onOpenSettings: () => void;
   onOpenRepositories: () => void;
   onOpenRequirements: () => void;
+  onOpenDatabase: () => void;
   onOpenPhase: (phase: string) => void;
   onCopy: (value: string, label: string) => void;
   onOpenDir: (
@@ -37,6 +37,7 @@ export function HomeView({
   onOpenSettings,
   onOpenRepositories,
   onOpenRequirements,
+  onOpenDatabase,
   onOpenPhase,
   onCopy,
   onOpenDir,
@@ -189,6 +190,7 @@ export function HomeView({
           onOpenDiagnostics={onOpenSettings}
           onOpenRepositories={onOpenRepositories}
           onOpenRequirements={onOpenRequirements}
+          onOpenDatabase={onOpenDatabase}
           onOpenPhase={onOpenPhase}
         />
 
@@ -201,28 +203,7 @@ export function HomeView({
         />
       </div>
 
-      <section className="next-milestone">
-        <div className="next-milestone-icon">
-          <Icon name="rocket" size={20} />
-        </div>
-        <div className="next-milestone-body">
-          <div className="next-milestone-head">
-            <h2>Siguiente hito: {PHASE_INFO[NEXT_PHASE].title}</h2>
-          </div>
-          <p>
-            Cada merge en GitHub se refleja como QAS 3/3, con reanudación de lotes
-            y reintentos desde una sola pantalla.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => onOpenPhase(NEXT_PHASE)}
-        >
-          Ver
-          <Icon name="arrow-right" size={14} />
-        </button>
-      </section>
+
     </div>
   );
 }

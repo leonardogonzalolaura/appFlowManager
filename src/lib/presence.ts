@@ -10,7 +10,11 @@ import type { RequirementPresence } from '../types';
  */
 export async function getEnvironmentStatus(
   requirementIds: string[],
+  force = false,
 ): Promise<RequirementPresence[]> {
   if (!isTauri() || requirementIds.length === 0) return [];
-  return invoke<RequirementPresence[]>('environment_status', { requirementIds });
+  return invoke<RequirementPresence[]>('environment_status', {
+    requirementIds,
+    force,
+  });
 }

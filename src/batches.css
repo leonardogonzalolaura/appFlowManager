@@ -134,6 +134,13 @@
   gap: 8px;
 }
 
+.batch-card-head .batch-card-actions {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .batch-title-row strong {
   font-size: 12px;
   font-weight: 650;

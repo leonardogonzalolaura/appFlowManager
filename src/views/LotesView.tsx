@@ -3,6 +3,7 @@ import { normalizeError } from '../lib/api';
 import {
   getDeploymentBatchSessions,
   listDeploymentBatches,
+  retryDeploymentBatch,
 } from '../lib/deployments';
 import { formatDateTime } from '../lib/format';
 import type {
@@ -31,6 +32,7 @@ export function LotesView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
   const [openingBatchId, setOpeningBatchId] = useState<string | null>(null);
+  const [retryingBatchId, setRetryingBatchId] = useState<string | null>(null);
   const [openBatch, setOpenBatch] = useState<OpenBatch | null>(null);
 
   const load = useCallback(async () => {
@@ -89,6 +91,32 @@ export function LotesView() {
       toast.error('No se pudo abrir el lote', { description: apiError.message });
     } finally {
       setOpeningBatchId(null);
+    }
+  }
+
+  async function retry(batch: DeploymentBatchSummary) {
+    setRetryingBatchId(batch.batchId);
+    try {
+      const sessions = await retryDeploymentBatch(batch.batchId);
+      const requirementIds = Array.from(
+        new Set(
+          sessions.flatMap((session) =>
+            session.selectedRequirements.map((requirement) => requirement.id),
+          ),
+        ),
+      );
+      setOpenBatch({ sessions, requirementIds });
+      toast.success('Lote reintentado', {
+        description: `${sessions.length} repositorio(s) listos para crear la rama hija.`,
+      });
+      void load();
+    } catch (caught) {
+      const apiError = normalizeError(caught);
+      toast.error('No se pudo reintentar el lote', {
+        description: apiError.message,
+      });
+    } finally {
+      setRetryingBatchId(null);
     }
   }
 
@@ -180,7 +208,9 @@ export function LotesView() {
               key={batch.batchId}
               batch={batch}
               opening={openingBatchId === batch.batchId}
+              retrying={retryingBatchId === batch.batchId}
               onOpen={() => void open(batch)}
+              onRetry={() => void retry(batch)}
             />
           ))}
         </div>
@@ -208,11 +238,15 @@ export function LotesView() {
 function BatchCard({
   batch,
   opening,
+  retrying,
   onOpen,
+  onRetry,
 }: {
   batch: DeploymentBatchSummary;
   opening: boolean;
+  retrying: boolean;
   onOpen: () => void;
+  onRetry: () => void;
 }) {
   const progress =
     batch.repositoryCount === 0
@@ -234,15 +268,29 @@ function BatchCard({
             {batch.requirementCount} requerimiento(s)
           </small>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={onOpen}
-          disabled={opening}
-        >
-          {opening ? <Spinner size="sm" /> : <Icon name="eye" size={13} />}
-          {opening ? 'Abriendo…' : 'Abrir lote'}
-        </button>
+        <div className="batch-card-actions">
+          {batch.status !== 'completed' ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={onRetry}
+              disabled={retrying || opening}
+              title="Vuelve a unificar los cambios y prepara un lote nuevo con los commits actuales"
+            >
+              {retrying ? <Spinner size="sm" /> : <Icon name="refresh" size={13} />}
+              {retrying ? 'Reintentando…' : 'Reintentar'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onOpen}
+            disabled={opening || retrying}
+          >
+            {opening ? <Spinner size="sm" /> : <Icon name="eye" size={13} />}
+            {opening ? 'Abriendo…' : 'Abrir lote'}
+          </button>
+        </div>
       </div>
 
       <div className="batch-progress">

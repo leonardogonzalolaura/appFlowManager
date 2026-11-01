@@ -2889,7 +2889,9 @@ Al final de cada fase: demo, tests verdes, documento actualizado y tu confirmaci
 - Estados: `applied` (todos los archivos coinciden), `partial` (algunos), `pending` (ninguno), `no_changes` (la rama no aporta archivos) y `unknown` (rama no encontrada o ambiente sin rama configurada).
 - Evidencia: `ancestry` cuando la rama del requerimiento o la rama hija empujada ya es ancestro del ambiente; `content` cuando coincide el contenido sin ancestría; `none` cuando no hay datos.
 - Historial: la última sesión de despliegue por requerimiento/repositorio/ambiente aporta la rama hija empujada y la fecha; se muestra con `↑` en el chip.
-- Rendimiento: evaluación en paralelo por repositorio (`spawn_blocking`) y datos de historial en una sola consulta. Caso real: 5 repositorios × 6 ambientes en ~1.2 s.
+- Rendimiento: evaluación en paralelo por repositorio (`spawn_blocking`) y datos de historial en una sola consulta. Caso real: 5 repositorios × 6 ambientes en ~1.2 s. El resultado se cachea 90 s por requerimiento; el botón **Ambientes** fuerza el recálculo.
+- Lotes: `deployment_batch_retry({ batchId })` vuelve a preparar el lote con los mismos requerimientos y ambiente, creando un batch nuevo. La UI expone **Reintentar** en cada lote no completado.
+- Preferencias editables en Configuración: `settings_get` / `settings_update` sobre `app_settings` para `base_branch` (fallback cuando el repositorio no detecta una) y `manual_key_prefix` (genera `MAN-0001`). El resto de valores son fijos por diseño (ambientes por repositorio, secretos con DPAPI).
 - UI: chips por repositorio en el detalle del requerimiento (`DEV 7/8`, `QAS 1/1`, `PRD 0/1`), con tooltip que incluye rama, archivos pendientes y último push. Botón **Ambientes** para recalcular.
 - Pruebas: 54 Rust (incluye detección aplicado/parcial/pendiente y archivos propios frente a la base) y 11 frontend.
 - Pendiente de esta fase: estado de PR vía GitHub API (requiere token), reintentos y reanudación en la pantalla de lotes, y caché con TTL para evitar recalcular al abrir el detalle repetidamente.

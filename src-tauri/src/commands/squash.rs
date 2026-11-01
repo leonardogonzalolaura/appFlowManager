@@ -673,7 +673,64 @@ pub async fn deployment_prepare(
     input: DeploymentPreviewInput,
 ) -> Result<Vec<SquashSession>, ApiError> {
     let pool = state.pool()?;
-    let _label = environment_label(pool, &input.environment).await?;
+    prepare_deployment(pool, &state.paths.worktrees_dir, input).await
+}
+
+/// Vuelve a preparar un lote completo con los mismos requerimientos y
+/// ambiente. Útil cuando un lote quedó a medias o falló.
+#[tauri::command]
+pub async fn deployment_batch_retry(
+    state: State<'_, AppState>,
+    batch_id: String,
+) -> Result<Vec<SquashSession>, ApiError> {
+    let pool = state.pool()?;
+    let rows = sqlx::query_as::<_, (Option<String>, String)>(
+        "SELECT environment, selected_requirements_json
+         FROM squash_sessions
+         WHERE batch_id = ?1
+         ORDER BY created_at",
+    )
+    .bind(&batch_id)
+    .fetch_all(pool)
+    .await?;
+    if rows.is_empty() {
+        return Err(AppError::NotFound("el lote".into()).into());
+    }
+    let environment = rows
+        .iter()
+        .find_map(|(environment, _)| environment.clone())
+        .ok_or_else(|| AppError::Validation("El lote no tiene un ambiente destino.".into()))?;
+    let mut requirement_ids = Vec::new();
+    for (_, json) in &rows {
+        let refs: Vec<SquashRequirementRef> = serde_json::from_str(json).unwrap_or_default();
+        for reference in refs {
+            if !requirement_ids.contains(&reference.id) {
+                requirement_ids.push(reference.id);
+            }
+        }
+    }
+    if requirement_ids.is_empty() {
+        return Err(
+            AppError::Validation("El lote no tiene requerimientos para reintentar.".into()).into(),
+        );
+    }
+    prepare_deployment(
+        pool,
+        &state.paths.worktrees_dir,
+        DeploymentPreviewInput {
+            requirement_ids,
+            environment,
+        },
+    )
+    .await
+}
+
+async fn prepare_deployment(
+    pool: &SqlitePool,
+    worktrees_dir: &Path,
+    input: DeploymentPreviewInput,
+) -> Result<Vec<SquashSession>, ApiError> {
+    environment_label(pool, &input.environment).await?;
     let rows = load_deployment_rows(pool, &input.requirement_ids, &input.environment).await?;
     let repositories = group_deployment_rows(rows);
     if repositories.is_empty() {
@@ -709,7 +766,7 @@ pub async fn deployment_prepare(
             .collect::<Vec<_>>();
         let session = prepare_squash(
             pool,
-            &state.paths.worktrees_dir,
+            worktrees_dir,
             SquashPrepareInput {
                 repository_id: repository.repository_id,
                 requirement_ids,
@@ -871,6 +928,7 @@ fn short_sha(sha: &str) -> String {
     sha.chars().take(8).collect()
 }
 
+#[cfg(test)]
 async fn apply_deployment(
     pool: &SqlitePool,
     session_id: &str,

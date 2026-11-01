@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { normalizeError } from '../lib/api';
 import { formatBytes, formatDateTime, gitVersionLabel } from '../lib/format';
-import type { SystemInfo } from '../types';
+import { getSettings, updateSettings } from '../lib/settings';
+import type { AppSettings, SystemInfo } from '../types';
 import { EnvironmentsModal } from '../components/repositories/EnvironmentsModal';
 import { Callout } from '../components/ui/Callout';
 import { Icon } from '../components/ui/Icon';
 import { Spinner } from '../components/ui/Spinner';
 import { StatusChip } from '../components/ui/StatusChip';
+import { toast } from '../components/ui/Toast';
 
 interface SettingsViewProps {
   info: SystemInfo;
@@ -27,6 +30,49 @@ export function SettingsView({
 }: SettingsViewProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [environmentsOpen, setEnvironmentsOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [baseBranch, setBaseBranch] = useState('');
+  const [manualPrefix, setManualPrefix] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void getSettings()
+      .then((loaded) => {
+        if (!active) return;
+        setSettings(loaded);
+        setBaseBranch(loaded.baseBranch);
+        setManualPrefix(loaded.manualKeyPrefix);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setSettingsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function saveSettings() {
+    setSettingsSaving(true);
+    try {
+      const updated = await updateSettings({
+        baseBranch: baseBranch.trim(),
+        manualKeyPrefix: manualPrefix.trim(),
+      });
+      setSettings(updated);
+      setBaseBranch(updated.baseBranch);
+      setManualPrefix(updated.manualKeyPrefix);
+      toast.success('Preferencias guardadas');
+    } catch (caught) {
+      toast.error('No se pudieron guardar las preferencias', {
+        description: normalizeError(caught).message,
+      });
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   return (
     <div className="settings">
@@ -177,35 +223,76 @@ export function SettingsView({
       <section className="surface">
         <header className="surface-header">
           <div>
-            <h2 className="surface-title">Preferencias iniciales</h2>
+            <h2 className="surface-title">Preferencias</h2>
             <p className="surface-subtitle">
-              Estos valores se podrán editar en las siguientes fases.
+              Valores por defecto de la app. Cada repositorio puede sobrescribir su rama
+              base.
             </p>
           </div>
-          
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => void saveSettings()}
+            disabled={settingsSaving || settingsLoading || !settings}
+          >
+            {settingsSaving ? <Spinner size="sm" /> : <Icon name="check" size={13} />}
+            Guardar
+          </button>
         </header>
 
-        <div className="preference-list">
-          <PreferenceRow
-            label="Rama base por defecto"
-            value="master"
-            hint="Cada repositorio puede sobrescribirla en la pantalla Repositorios."
-          />
-          <PreferenceRow
-            label="Prefijo de requerimientos manuales"
-            value="MAN-0001"
-            hint="La app genera la siguiente key disponible."
-          />
-          <PreferenceRow
-            label="Rama de ambiente"
-            value="Detección automática + override"
-            hint="Se configura por repositorio en la Fase 1."
-          />
-          <PreferenceRow
-            label="Secretos de base de datos"
-            value="DPAPI (usuario de Windows)"
-            hint="Nunca se envían al frontend ni se guardan en texto plano."
-          />
+        {settingsLoading ? (
+          <div className="settings-loading">
+            <Spinner size="sm" />
+            <span>Cargando preferencias…</span>
+          </div>
+        ) : (
+          <div className="preference-form">
+            <div className="field">
+              <label className="field-label" htmlFor="settings-base-branch">
+                Rama base por defecto
+              </label>
+              <input
+                id="settings-base-branch"
+                className="input"
+                value={baseBranch}
+                onChange={(event) => setBaseBranch(event.target.value)}
+                placeholder="master"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <small className="field-hint">
+                Se usa solo si el repositorio no expone una rama por defecto al
+                registrarlo.
+              </small>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="settings-manual-prefix">
+                Prefijo de requerimientos manuales
+              </label>
+              <input
+                id="settings-manual-prefix"
+                className="input"
+                value={manualPrefix}
+                onChange={(event) =>
+                  setManualPrefix(event.target.value.toUpperCase())
+                }
+                placeholder="MAN"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <small className="field-hint">
+                Genera claves como {manualPrefix.trim() || 'MAN'}-0001. Letras y
+                números, entre 2 y 10 caracteres.
+              </small>
+            </div>
+          </div>
+        )}
+
+        <div className="settings-actions">
+          <span className="settings-inline-hint">
+            Los secretos de base de datos siguen cifrados con DPAPI y nunca se envían al
+            frontend.
+          </span>
         </div>
       </section>
 
@@ -356,24 +443,6 @@ function PathRow({ label, path, onCopy, onOpen }: PathRowProps) {
           <Icon name="folder" size={14} />
         </button>
       </div>
-    </div>
-  );
-}
-
-interface PreferenceRowProps {
-  label: string;
-  value: string;
-  hint: string;
-}
-
-function PreferenceRow({ label, value, hint }: PreferenceRowProps) {
-  return (
-    <div className="preference-row">
-      <div>
-        <span className="preference-label">{label}</span>
-        <span className="preference-hint">{hint}</span>
-      </div>
-      <span className="preference-value">{value}</span>
     </div>
   );
 }

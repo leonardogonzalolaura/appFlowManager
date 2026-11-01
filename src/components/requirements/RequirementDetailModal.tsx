@@ -65,10 +65,10 @@ export function RequirementDetailModal({
   const [presenceLoading, setPresenceLoading] = useState(false);
   const [presenceError, setPresenceError] = useState<string | null>(null);
 
-  async function loadPresence() {
+  async function loadPresence(force = false) {
     setPresenceLoading(true);
     try {
-      const [loaded] = await getEnvironmentStatus([requirementId]);
+      const [loaded] = await getEnvironmentStatus([requirementId], force);
       setPresence(loaded ?? null);
       setPresenceError(null);
     } catch (caught) {
@@ -332,7 +332,7 @@ export function RequirementDetailModal({
                     type="button"
                     className="btn btn-ghost btn-sm"
                     title="Recalcular el estado de cada ambiente"
-                    onClick={() => void loadPresence()}
+                    onClick={() => void loadPresence(true)}
                     disabled={presenceLoading}
                   >
                     {presenceLoading ? (

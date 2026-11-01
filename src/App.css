@@ -1462,6 +1462,22 @@ code {
   padding: 0 18px 16px;
 }
 
+.preference-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 0 18px 8px;
+}
+
+.settings-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px 16px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .preference-row {
   display: flex;
   align-items: center;
