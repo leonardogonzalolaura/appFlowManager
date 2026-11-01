@@ -64,6 +64,17 @@ export async function stageAllSquash(
   return invoke<SquashSession>('squash_stage_all', { sessionId });
 }
 
+export async function resolveSquashConflict(
+  sessionId: string,
+  filePath: string,
+  side: 'ours' | 'theirs',
+): Promise<SquashSession> {
+  requireDesktop();
+  return invoke<SquashSession>('squash_resolve_conflict', {
+    input: { sessionId, filePath, side },
+  });
+}
+
 export async function continueSquash(sessionId: string): Promise<SquashSession> {
   requireDesktop();
   return invoke<SquashSession>('squash_continue', { sessionId });

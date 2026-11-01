@@ -3,6 +3,7 @@ import { isTauri } from './api';
 import type {
   DeploymentBatchSummary,
   DeploymentPreview,
+  DeploymentReport,
   SquashSession,
 } from '../types';
 
@@ -39,6 +40,13 @@ export async function prepareDeployment(
 export async function applyDeployment(sessionId: string): Promise<SquashSession> {
   requireDesktop();
   return invoke<SquashSession>('deployment_apply', { sessionId });
+}
+
+export async function getDeploymentReport(
+  sessionId: string,
+): Promise<DeploymentReport> {
+  requireDesktop();
+  return invoke<DeploymentReport>('deployment_report', { sessionId });
 }
 
 export async function pushDeployment(sessionId: string): Promise<SquashSession> {

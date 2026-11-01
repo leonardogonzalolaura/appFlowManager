@@ -222,12 +222,21 @@ pub fn head_is_detached(worktree: &Path) -> Result<bool, AppError> {
 }
 
 pub fn diff_stat(worktree: &Path, base_sha: &str) -> Result<(usize, usize, usize), AppError> {
+    diff_stat_between(worktree, base_sha, "HEAD")
+}
+
+/// (archivos, adiciones, eliminaciones) entre dos revisiones.
+pub fn diff_stat_between(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+) -> Result<(usize, usize, usize), AppError> {
     let run = run_git(
-        Some(worktree),
+        Some(repo_path),
         &[
             "diff".to_string(),
             "--numstat".to_string(),
-            format!("{base_sha}..HEAD"),
+            format!("{from}..{to}"),
         ],
         Duration::from_secs(30),
     )?;
@@ -250,6 +259,141 @@ pub fn diff_stat(worktree: &Path, base_sha: &str) -> Result<(usize, usize, usize
         deletions += del.parse::<usize>().unwrap_or(0);
     }
     Ok((files, additions, deletions))
+}
+
+/// Archivos que difieren entre dos revisiones.
+pub fn changed_files(
+    repo_path: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "diff".to_string(),
+            "--name-only".to_string(),
+            "-z".to_string(),
+            format!("{from}..{to}"),
+        ],
+        Duration::from_secs(60),
+    )?;
+    if !run.success {
+        return Ok(Vec::new());
+    }
+    Ok(run
+        .stdout
+        .split('\0')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// SHA del blob de `path` en `rev`, o None si el archivo no existe allí.
+pub fn blob_id(
+    repo_path: &Path,
+    rev: &str,
+    path: &str,
+) -> Result<Option<String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "rev-parse".to_string(),
+            "--verify".to_string(),
+            format!("{rev}:{path}"),
+        ],
+        Duration::from_secs(15),
+    )?;
+    if run.success {
+        Ok(Some(
+            run.stdout
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Archivos del índice que todavía conservan marcadores de conflicto.
+pub fn conflict_marker_files(worktree: &Path) -> Result<Vec<String>, AppError> {
+    let run = run_git(
+        Some(worktree),
+        &[
+            "diff".to_string(),
+            "--cached".to_string(),
+            "--name-only".to_string(),
+            "-z".to_string(),
+        ],
+        Duration::from_secs(30),
+    )?;
+    if !run.success {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for file in run
+        .stdout
+        .split('\0')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let staged = run_git(
+            Some(worktree),
+            &["show".to_string(), format!(":{file}")],
+            Duration::from_secs(15),
+        )?;
+        if !staged.success {
+            continue;
+        }
+        let has_marker = staged
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("<<<<<<<") || line.starts_with(">>>>>>>"));
+        if has_marker {
+            files.push(file.to_string());
+        }
+    }
+    Ok(files)
+}
+
+/// Indica si el índice agrega cambios reales (no solo líneas en blanco o
+/// espacios). Evita crear commits vacíos al resolver un conflicto.
+pub fn has_meaningful_staged_changes(worktree: &Path) -> Result<bool, AppError> {
+    let run = run_git(
+        Some(worktree),
+        &[
+            "diff".to_string(),
+            "--cached".to_string(),
+            "--numstat".to_string(),
+            "--ignore-all-space".to_string(),
+            "--ignore-blank-lines".to_string(),
+        ],
+        Duration::from_secs(30),
+    )?;
+    Ok(!run.stdout.trim().is_empty())
+}
+
+/// Toma la versión del ambiente (ours) o del requerimiento (theirs) para un
+/// archivo en conflicto. No hace stage: lo hace el llamador.
+pub fn checkout_conflict_side(
+    worktree: &Path,
+    file: &str,
+    side: &str,
+) -> Result<GitRun, AppError> {
+    let flag = if side == "ours" { "--ours" } else { "--theirs" };
+    run_git(
+        Some(worktree),
+        &[
+            "checkout".to_string(),
+            flag.to_string(),
+            "--".to_string(),
+            file.to_string(),
+        ],
+        Duration::from_secs(30),
+    )
 }
 
 pub fn rev_parse(repo_path: &Path, rev: &str) -> Result<Option<String>, AppError> {

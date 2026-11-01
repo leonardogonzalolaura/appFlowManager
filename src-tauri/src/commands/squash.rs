@@ -71,6 +71,9 @@ pub struct SquashSession {
     pub files_changed: i64,
     pub additions: i64,
     pub deletions: i64,
+    pub deploy_files_changed: i64,
+    pub deploy_additions: i64,
+    pub deploy_deletions: i64,
     pub error_message: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -91,6 +94,15 @@ pub struct SquashPrepareInput {
 pub struct SquashStageInput {
     pub session_id: String,
     pub file_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SquashResolveInput {
+    pub session_id: String,
+    pub file_path: String,
+    /// `ours` = versión del ambiente, `theirs` = versión del requerimiento.
+    pub side: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +152,20 @@ pub struct DeploymentPreview {
     pub requirement_count: usize,
     pub common_repository_count: usize,
     pub unmapped_requirements: Vec<SquashRequirementRef>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentReport {
+    /// Archivos que toca el commit squash (paso 1).
+    pub squash_files: Vec<String>,
+    /// Archivos del squash cuyo contenido ya es idéntico en la rama del
+    /// ambiente; por eso no generan cambios en la rama hija.
+    pub already_in_environment: Vec<String>,
+    /// Archivos que realmente agrega el commit de la rama hija.
+    pub deploy_files: Vec<String>,
+    pub additions: i64,
+    pub deletions: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -243,6 +269,9 @@ struct SessionRow {
     files_changed: i64,
     additions: i64,
     deletions: i64,
+    deploy_files_changed: i64,
+    deploy_additions: i64,
+    deploy_deletions: i64,
     error_message: Option<String>,
     created_at: String,
     updated_at: String,
@@ -733,6 +762,60 @@ pub async fn deployment_apply(
     apply_deployment(pool, &session_id).await
 }
 
+/// Explica el delta real de una sesión de despliegue: qué archivos toca el
+/// squash, cuáles ya están idénticos en el ambiente y cuáles agrega la rama
+/// hija. Evita la falsa sensación de que "se perdieron archivos".
+#[tauri::command]
+pub async fn deployment_report(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<DeploymentReport, ApiError> {
+    let pool = state.pool()?;
+    let session = load_session(pool, &session_id).await?;
+    let repo = load_repo(pool, &session.repository_id).await?;
+    Ok(build_deployment_report(&repo, &session)?)
+}
+
+fn build_deployment_report(
+    repo: &RepoRow,
+    session: &SessionRow,
+) -> Result<DeploymentReport, AppError> {
+    let mut report = DeploymentReport {
+        squash_files: Vec::new(),
+        already_in_environment: Vec::new(),
+        deploy_files: Vec::new(),
+        additions: 0,
+        deletions: 0,
+    };
+    let Some(squash_sha) = session.squash_sha.clone() else {
+        return Ok(report);
+    };
+    let Some(target_base) = session.target_base_sha.clone() else {
+        return Ok(report);
+    };
+    let repo_path = Path::new(&repo.local_path);
+    let Some(parent) = squash_ops::rev_parse(repo_path, &format!("{squash_sha}^"))? else {
+        return Ok(report);
+    };
+    report.squash_files = squash_ops::changed_files(repo_path, &parent, &squash_sha)?;
+    for file in &report.squash_files {
+        let squash_blob = squash_ops::blob_id(repo_path, &squash_sha, file)?;
+        let base_blob = squash_ops::blob_id(repo_path, &target_base, file)?;
+        if squash_blob == base_blob {
+            report.already_in_environment.push(file.clone());
+        }
+    }
+    if let Some(deploy_sha) = session.deploy_sha.as_deref() {
+        report.deploy_files =
+            squash_ops::changed_files(repo_path, &target_base, deploy_sha)?;
+        let (_, additions, deletions) =
+            squash_ops::diff_stat_between(repo_path, &target_base, deploy_sha)?;
+        report.additions = additions as i64;
+        report.deletions = deletions as i64;
+    }
+    Ok(report)
+}
+
 async fn apply_deployment(
     pool: &SqlitePool,
     session_id: &str,
@@ -897,13 +980,17 @@ async fn apply_deployment(
         .await;
     }
 
-    if !squash_ops::has_staged_changes(worktree)? {
+    if !squash_ops::has_staged_changes(worktree)?
+        || !squash_ops::has_meaningful_staged_changes(worktree)?
+    {
         let _ = squash_ops::cherry_pick_quit(worktree);
         sqlx::query(
             "UPDATE squash_sessions
              SET phase = 'deploy', status = 'no_changes', environment = ?1,
                  target_branch = ?2, target_base_sha = ?3, deploy_branch = ?4,
-                 deploy_sha = ?3, conflicts_json = '[]', updated_at = ?5
+                 deploy_sha = ?3, conflicts_json = '[]',
+                 deploy_files_changed = 0, deploy_additions = 0, deploy_deletions = 0,
+                 updated_at = ?5
              WHERE id = ?6",
         )
         .bind(&environment)
@@ -928,6 +1015,8 @@ async fn apply_deployment(
         .await;
     }
     let deploy_sha = squash_ops::head_sha(worktree)?;
+    let (deploy_files, deploy_additions, deploy_deletions) =
+        squash_ops::diff_stat(worktree, &target_base_sha)?;
     let run = git_cli::update_branch_ref(
         worktree,
         &deploy_branch,
@@ -948,14 +1037,19 @@ async fn apply_deployment(
         "UPDATE squash_sessions
          SET phase = 'deploy', status = 'ready', environment = ?1,
              target_branch = ?2, target_base_sha = ?3, deploy_branch = ?4,
-             deploy_sha = ?5, conflicts_json = '[]', error_message = NULL, updated_at = ?6
-         WHERE id = ?7",
+             deploy_sha = ?5, deploy_files_changed = ?6, deploy_additions = ?7,
+             deploy_deletions = ?8, conflicts_json = '[]', error_message = NULL,
+             updated_at = ?9
+         WHERE id = ?10",
     )
     .bind(&environment)
     .bind(&target_branch)
     .bind(&target_base_sha)
     .bind(&deploy_branch)
     .bind(&deploy_sha)
+    .bind(deploy_files as i64)
+    .bind(deploy_additions as i64)
+    .bind(deploy_deletions as i64)
     .bind(now())
     .bind(&session.id)
     .execute(pool)
@@ -1094,7 +1188,8 @@ async fn list_deployment_batches(
                 s.worktree_path, s.strategy, s.status, s.message,
                 s.selected_requirements_json, s.selected_commits_json, s.plan_json,
                 s.conflicts_json, s.squash_sha, s.files_changed, s.additions,
-                s.deletions, s.error_message, s.created_at, s.updated_at
+                s.deletions, s.deploy_files_changed, s.deploy_additions,
+                s.deploy_deletions, s.error_message, s.created_at, s.updated_at
          FROM squash_sessions s
          JOIN repositories r ON r.id = s.repository_id
          WHERE s.batch_id IS NOT NULL
@@ -1147,7 +1242,8 @@ pub async fn deployment_batch_sessions(
                 s.worktree_path, s.strategy, s.status, s.message,
                 s.selected_requirements_json, s.selected_commits_json, s.plan_json,
                 s.conflicts_json, s.squash_sha, s.files_changed, s.additions,
-                s.deletions, s.error_message, s.created_at, s.updated_at
+                s.deletions, s.deploy_files_changed, s.deploy_additions,
+                s.deploy_deletions, s.error_message, s.created_at, s.updated_at
          FROM squash_sessions s
          JOIN repositories r ON r.id = s.repository_id
          WHERE s.batch_id = ?1
@@ -1417,6 +1513,7 @@ pub async fn squash_list(
                 s.strategy, s.status, s.message, s.selected_requirements_json,
                 s.selected_commits_json, s.plan_json, s.conflicts_json,
                 s.squash_sha, s.files_changed, s.additions, s.deletions,
+                s.deploy_files_changed, s.deploy_additions, s.deploy_deletions,
                 s.error_message, s.created_at, s.updated_at
          FROM squash_sessions s
          JOIN repositories r ON r.id = s.repository_id
@@ -1483,6 +1580,37 @@ pub async fn squash_stage_all(
     refresh_conflicts_for(pool, &session).await
 }
 
+/// Resuelve un archivo en conflicto tomando una de las dos versiones y lo
+/// agrega al índice. Evita que al borrar los marcadores a mano queden líneas
+/// vacías o se pierdan cambios sin avisar.
+#[tauri::command]
+pub async fn squash_resolve_conflict(
+    state: State<'_, AppState>,
+    input: SquashResolveInput,
+) -> Result<SquashSession, ApiError> {
+    if input.side != "ours" && input.side != "theirs" {
+        return Err(AppError::Validation(
+            "La versión debe ser 'ours' (ambiente) o 'theirs' (requerimiento).".into(),
+        )
+        .into());
+    }
+    let pool = state.pool()?;
+    let session = load_session(pool, &input.session_id).await?;
+    let worktree = Path::new(&session.worktree_path);
+    squash_ops::validate_inside(worktree, &input.file_path)?;
+    let run = squash_ops::checkout_conflict_side(worktree, &input.file_path, &input.side)?;
+    if !run.success {
+        return Err(
+            git_cli::invalidate_run(&run, "No se pudo tomar esa versión del archivo").into(),
+        );
+    }
+    let run = squash_ops::stage_file(worktree, &input.file_path)?;
+    if !run.success {
+        return Err(git_cli::invalidate_run(&run, "No se pudo agregar el archivo").into());
+    }
+    refresh_conflicts_for(pool, &session).await
+}
+
 #[tauri::command]
 pub async fn squash_continue(
     state: State<'_, AppState>,
@@ -1506,6 +1634,15 @@ async fn continue_squash(
         return Err(AppError::Validation(format!(
             "Faltan {} archivo(s) por resolver.",
             conflicts.len()
+        ))
+        .into());
+    }
+    let markers = squash_ops::conflict_marker_files(worktree)?;
+    if !markers.is_empty() {
+        return Err(AppError::Validation(format!(
+            "Quedan marcadores de conflicto en {} archivo(s): {}. Elimínalos o usa una de las versiones antes de continuar.",
+            markers.len(),
+            markers.join(", ")
         ))
         .into());
     }
@@ -1534,14 +1671,19 @@ async fn continue_squash(
             .into());
         }
         let was_detached = squash_ops::head_is_detached(worktree)?;
-        if !squash_ops::has_staged_changes(worktree)? {
+        if !squash_ops::has_staged_changes(worktree)?
+            || !squash_ops::has_meaningful_staged_changes(worktree)?
+        {
             let head = squash_ops::head_sha(worktree)?;
+            let _ = squash_ops::cherry_pick_quit(worktree);
             if !was_detached {
                 let _ = git_cli::checkout_detached(worktree, &head);
             }
             sqlx::query(
                 "UPDATE squash_sessions SET status = 'no_changes', deploy_sha = ?1,
-                    conflicts_json = '[]', error_message = NULL, updated_at = ?2
+                    conflicts_json = '[]', error_message = NULL,
+                    deploy_files_changed = 0, deploy_additions = 0,
+                    deploy_deletions = 0, updated_at = ?2
                  WHERE id = ?3",
             )
             .bind(&head)
@@ -1562,6 +1704,8 @@ async fn continue_squash(
             .await;
         }
         let deploy_sha = squash_ops::head_sha(worktree)?;
+        let (deploy_files, deploy_additions, deploy_deletions) =
+            squash_ops::diff_stat(worktree, &target_base_sha)?;
         let _ = squash_ops::cherry_pick_quit(worktree);
         if was_detached {
             let run = git_cli::update_branch_ref(
@@ -1602,10 +1746,15 @@ async fn continue_squash(
         }
         sqlx::query(
             "UPDATE squash_sessions SET status = 'ready', deploy_sha = ?1,
-                conflicts_json = '[]', error_message = NULL, updated_at = ?2
-             WHERE id = ?3",
+                deploy_files_changed = ?2, deploy_additions = ?3,
+                deploy_deletions = ?4, conflicts_json = '[]',
+                error_message = NULL, updated_at = ?5
+             WHERE id = ?6",
         )
         .bind(&deploy_sha)
+        .bind(deploy_files as i64)
+        .bind(deploy_additions as i64)
+        .bind(deploy_deletions as i64)
         .bind(now())
         .bind(&session.id)
         .execute(pool)
@@ -2007,6 +2156,7 @@ async fn load_session(pool: &SqlitePool, session_id: &str) -> Result<SessionRow,
                 s.strategy, s.status, s.message, s.selected_requirements_json,
                 s.selected_commits_json, s.plan_json, s.conflicts_json,
                 s.squash_sha, s.files_changed, s.additions, s.deletions,
+                s.deploy_files_changed, s.deploy_additions, s.deploy_deletions,
                 s.error_message, s.created_at, s.updated_at
          FROM squash_sessions s JOIN repositories r ON r.id = s.repository_id
          WHERE s.id = ?1",
@@ -2052,6 +2202,9 @@ impl SessionRow {
             files_changed: self.files_changed,
             additions: self.additions,
             deletions: self.deletions,
+            deploy_files_changed: self.deploy_files_changed,
+            deploy_additions: self.deploy_additions,
+            deploy_deletions: self.deploy_deletions,
             error_message: self.error_message,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -2198,6 +2351,45 @@ mod tests {
         .expect("commit")
     }
 
+    fn tree_with_files(
+        repo: &Repository,
+        parent: Option<Oid>,
+        files: &[(&str, &str)],
+    ) -> Oid {
+        let parent_tree = parent.map(|oid| repo.find_commit(oid).unwrap().tree().unwrap());
+        let mut builder = repo
+            .treebuilder(parent_tree.as_ref())
+            .expect("tree builder");
+        for (file, content) in files {
+            let blob = repo.blob(content.as_bytes()).expect("blob");
+            builder.insert(*file, blob, 0o100644).expect("insert");
+        }
+        builder.write().expect("write tree")
+    }
+
+    fn commit_files(
+        repo: &Repository,
+        branch: &str,
+        parent: Option<Oid>,
+        files: &[(&str, &str)],
+        message: &str,
+    ) -> Oid {
+        let tree_id = tree_with_files(repo, parent, files);
+        let tree = repo.find_tree(tree_id).unwrap();
+        let parent_commit = parent.map(|oid| repo.find_commit(oid).unwrap());
+        let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+        let sig = signature();
+        repo.commit(
+            Some(&format!("refs/heads/{branch}")),
+            &sig,
+            &sig,
+            message,
+            &tree,
+            &parents,
+        )
+        .expect("commit")
+    }
+
     fn commit_on(
         repo: &Repository,
         branch: &str,
@@ -2220,6 +2412,39 @@ mod tests {
         let main = commit_on(&repo, "main", None, "README.md", "init");
         let dev = commit_on(&repo, "dev", Some(main), "dev.txt", "dev base");
         commit_on(&repo, "feature/BPIM-1", Some(main), "feature.txt", "feature work");
+        repo.set_head("refs/heads/main").expect("head");
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .expect("checkout");
+        (main, dev)
+    }
+
+    fn seed_partial_env_repo(path: &Path) -> (Oid, Oid) {
+        let repo = Repository::init(path).expect("init");
+        let main = commit_files(
+            &repo,
+            "main",
+            None,
+            &[("README.md", "# base\n"), ("shared.txt", "old\n")],
+            "init",
+        );
+        let dev = commit_files(
+            &repo,
+            "dev",
+            Some(main),
+            &[("README.md", "# dev\n"), ("shared.txt", "same\n")],
+            "dev change",
+        );
+        commit_files(
+            &repo,
+            "feature/BPIM-1",
+            Some(main),
+            &[
+                ("README.md", "# feature\n"),
+                ("shared.txt", "same\n"),
+                ("feature.txt", "feature\n"),
+            ],
+            "feature change",
+        );
         repo.set_head("refs/heads/main").expect("head");
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
             .expect("checkout");
@@ -2259,25 +2484,21 @@ mod tests {
     }
 
     async fn setup_deployment(with_remote: bool) -> (TempDir, SqlitePool, PathBuf) {
-        setup_deployment_internal(with_remote, false).await
+        setup_deployment_internal(with_remote, seed_repo).await
     }
 
     async fn setup_conflict_deployment() -> (TempDir, SqlitePool, PathBuf) {
-        setup_deployment_internal(false, true).await
+        setup_deployment_internal(false, seed_conflict_repo).await
     }
 
     async fn setup_deployment_internal(
         with_remote: bool,
-        conflict: bool,
+        seed: fn(&Path) -> (Oid, Oid),
     ) -> (TempDir, SqlitePool, PathBuf) {
         let dir = tempfile::tempdir().expect("temp dir");
         let repo_path = dir.path().join("demo-repo");
         std::fs::create_dir_all(&repo_path).expect("repo dir");
-        let (_main, dev) = if conflict {
-            seed_conflict_repo(&repo_path)
-        } else {
-            seed_repo(&repo_path)
-        };
+        let (_main, dev) = seed(&repo_path);
         let dev_sha = dev.to_string();
 
         let remote_url = if with_remote {
@@ -2510,6 +2731,146 @@ mod tests {
             .expect("worktree repo")
             .head_detached()
             .expect("detached after continue"));
+
+        cleanup_session(&pool, &continued).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_blank_only_resolution_ends_without_net_changes() {
+        let (dir, pool, repo_path) = setup_conflict_deployment().await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        let applied = apply_deployment(&pool, &prepared.id)
+            .await
+            .expect("apply conflict");
+        assert_eq!(applied.status, "conflict");
+
+        let worktree = Path::new(&applied.worktree_path);
+        // La resolución solo agrega una línea en blanco: no hay cambio real.
+        std::fs::write(worktree.join("README.md"), "# dev\n\n").expect("resolve file");
+        let staged = squash_ops::stage_file(worktree, "README.md").expect("stage");
+        assert!(staged.success);
+
+        let continued = continue_squash(&pool, &applied.id)
+            .await
+            .expect("continue");
+        assert_eq!(continued.status, "no_changes");
+        assert_eq!(continued.deploy_files_changed, 0);
+        assert_eq!(continued.deploy_additions, 0);
+        assert_eq!(continued.deploy_deletions, 0);
+
+        let local = squash_ops::rev_parse(
+            Path::new(&repo_path),
+            "refs/heads/BPIM-1-dev",
+        )
+        .expect("local ref")
+        .expect("local branch");
+        assert_eq!(Some(local), continued.target_base_sha);
+
+        cleanup_session(&pool, &continued).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_continue_blocks_when_conflict_markers_remain() {
+        let (dir, pool, _repo_path) = setup_conflict_deployment().await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        let applied = apply_deployment(&pool, &prepared.id)
+            .await
+            .expect("apply conflict");
+
+        let worktree = Path::new(&applied.worktree_path);
+        std::fs::write(
+            worktree.join("README.md"),
+            "<<<<<<< HEAD\n# dev\n=======\n# feature\n>>>>>>> feature\n",
+        )
+        .expect("write markers");
+        let staged = squash_ops::stage_file(worktree, "README.md").expect("stage");
+        assert!(staged.success);
+
+        let error = continue_squash(&pool, &applied.id)
+            .await
+            .expect_err("markers must block");
+        assert_eq!(error.code, "VALIDATION");
+        assert!(error.message.contains("marcadores"));
+
+        cleanup_session(&pool, &applied).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_report_marks_files_already_present_in_environment() {
+        let (dir, pool, _repo_path) =
+            setup_deployment_internal(false, seed_partial_env_repo).await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        let applied = apply_deployment(&pool, &prepared.id)
+            .await
+            .expect("apply conflict");
+        assert_eq!(applied.status, "conflict");
+
+        let session = load_session(&pool, &applied.id).await.expect("load");
+        let repo = load_repo(&pool, &session.repository_id)
+            .await
+            .expect("repo");
+        let report = build_deployment_report(&repo, &session).expect("report");
+        assert_eq!(report.squash_files.len(), 3);
+        assert_eq!(
+            report.already_in_environment,
+            vec!["shared.txt".to_string()]
+        );
+        assert!(report.deploy_files.is_empty());
+
+        let worktree = Path::new(&applied.worktree_path);
+        std::fs::write(worktree.join("README.md"), "# feature\n# dev\n")
+            .expect("resolve file");
+        let staged = squash_ops::stage_file(worktree, "README.md").expect("stage");
+        assert!(staged.success);
+        let continued = continue_squash(&pool, &applied.id)
+            .await
+            .expect("continue");
+        assert_eq!(continued.status, "ready");
+        assert_eq!(continued.deploy_files_changed, 2);
+
+        let session = load_session(&pool, &continued.id).await.expect("load");
+        let repo = load_repo(&pool, &session.repository_id)
+            .await
+            .expect("repo");
+        let report = build_deployment_report(&repo, &session).expect("report");
+        assert_eq!(report.deploy_files.len(), 2);
+        assert_eq!(
+            report.already_in_environment,
+            vec!["shared.txt".to_string()]
+        );
 
         cleanup_session(&pool, &continued).await;
         pool.close().await;

@@ -35,7 +35,7 @@ export function ScriptEditorModal({
     script?.repositoryId ?? repositories[0]?.repositoryId ?? '',
   );
   const [name, setName] = useState(script?.name ?? '');
-  const [engine, setEngine] = useState<DbEngine>(script?.engine ?? 'sqlserver');
+  const [engine, setEngine] = useState<DbEngine>(script?.engine ?? 'postgres');
   const [environmentScope, setEnvironmentScope] = useState(
     script?.environmentScope ?? 'all',
   );
@@ -144,8 +144,9 @@ export function ScriptEditorModal({
               disabled={busy}
               autoComplete="off"
             >
-              <option value="sqlserver">SQL Server</option>
               <option value="postgres">PostgreSQL</option>
+              <option value="sqlserver">SQL Server</option>
+              
             </select>
           </div>
           <div className="field">

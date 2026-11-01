@@ -4,6 +4,7 @@ import { normalizeError } from '../../lib/api';
 import { copyText, formatDateTime, shortSha, truncateMiddle } from '../../lib/format';
 import {
   applyDeployment,
+  getDeploymentReport,
   prepareDeployment,
   previewDeployment,
   pushDeployment,
@@ -16,12 +17,14 @@ import {
   openSquashFolder,
   openSquashInTaruGit,
   refreshSquashConflicts,
+  resolveSquashConflict,
   stageAllSquash,
   stageSquashFile,
 } from '../../lib/squash';
 import type {
   ApiError,
   DeploymentPreview,
+  DeploymentReport,
   EnvironmentDefinition,
   SquashSession,
 } from '../../types';
@@ -43,7 +46,14 @@ interface DeploymentWizardModalProps {
   onFinished?: () => void;
 }
 
-type BusyAction = 'apply' | 'push' | 'stage' | 'continue' | 'abort' | 'refresh';
+type BusyAction =
+  | 'apply'
+  | 'push'
+  | 'stage'
+  | 'resolve'
+  | 'continue'
+  | 'abort'
+  | 'refresh';
 
 export function DeploymentWizardModal({
   requirementIds,
@@ -58,6 +68,7 @@ export function DeploymentWizardModal({
   const [environment, setEnvironment] = useState(firstEnvironment);
   const [preview, setPreview] = useState<DeploymentPreview | null>(null);
   const [sessions, setSessions] = useState<SquashSession[]>(initialSessions ?? []);
+  const [reports, setReports] = useState<Record<string, DeploymentReport>>({});
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [busy, setBusy] = useState<Record<string, BusyAction>>({});
@@ -128,6 +139,40 @@ export function DeploymentWizardModal({
   );
   const pushed = sessions.filter((session) => Boolean(session.pushedSha));
   const hasConflict = sessions.some((session) => session.status === 'conflict');
+
+  const reportsKey = sessions
+    .filter((session) => session.phase === 'deploy' && session.status !== 'aborted')
+    .map((session) => `${session.id}:${session.deploySha ?? '-'}:${session.status}`)
+    .join('|');
+
+  useEffect(() => {
+    const targets = sessions.filter(
+      (session) => session.phase === 'deploy' && session.status !== 'aborted',
+    );
+    if (targets.length === 0) return;
+    let active = true;
+    void Promise.allSettled(
+      targets.map(async (session) => {
+        const report = await getDeploymentReport(session.id);
+        return [session.id, report] as const;
+      }),
+    ).then((results) => {
+      if (!active) return;
+      setReports((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            next[result.value[0]] = result.value[1];
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportsKey]);
 
   function updateSession(updated: SquashSession) {
     setSessions((current) =>
@@ -257,6 +302,29 @@ export function DeploymentWizardModal({
       toast.success('Archivos agregados');
     } catch (caught) {
       toast.error('No se pudieron agregar los archivos', {
+        description: normalizeError(caught).message,
+      });
+    } finally {
+      setSessionBusy(session.id, null);
+    }
+  }
+
+  async function handleResolve(
+    session: SquashSession,
+    file: string,
+    side: 'ours' | 'theirs',
+  ) {
+    setSessionBusy(session.id, 'resolve');
+    try {
+      updateSession(await resolveSquashConflict(session.id, file, side));
+      toast.success(
+        side === 'ours'
+          ? 'Se mantuvo la versión del ambiente'
+          : 'Se usó la versión del requerimiento',
+        { description: file },
+      );
+    } catch (caught) {
+      toast.error('No se pudo resolver el archivo', {
         description: normalizeError(caught).message,
       });
     } finally {
@@ -703,11 +771,13 @@ export function DeploymentWizardModal({
             <DeploymentSessionCard
               key={session.id}
               session={session}
+              report={reports[session.id]}
               busyAction={busy[session.id]}
               onApply={() => void apply(session)}
               onPush={() => void push(session)}
               onStage={(file) => void handleStage(session, file)}
               onStageAll={() => void handleStageAll(session)}
+              onResolve={(file, side) => void handleResolve(session, file, side)}
               onContinue={() => void handleContinue(session)}
               onRefresh={() => void handleRefresh(session)}
               onAbort={() => void handleAbort(session)}
@@ -761,11 +831,13 @@ export function DeploymentWizardModal({
 
 interface DeploymentSessionCardProps {
   session: SquashSession;
+  report?: DeploymentReport;
   busyAction?: BusyAction;
   onApply: () => void;
   onPush: () => void;
   onStage: (file: string) => void;
   onStageAll: () => void;
+  onResolve: (file: string, side: 'ours' | 'theirs') => void;
   onContinue: () => void;
   onRefresh: () => void;
   onAbort: () => void;
@@ -777,11 +849,13 @@ interface DeploymentSessionCardProps {
 
 function DeploymentSessionCard({
   session,
+  report,
   busyAction,
   onApply,
   onPush,
   onStage,
   onStageAll,
+  onResolve,
   onContinue,
   onRefresh,
   onAbort,
@@ -796,6 +870,17 @@ function DeploymentSessionCard({
   const pushed = Boolean(session.pushedSha);
   const canApply = session.phase === 'squash' && session.status === 'ready';
   const canPush = session.phase === 'deploy' && session.status === 'ready' && !pushed;
+  const hasDeployCommit = session.phase === 'deploy' && Boolean(session.deploySha);
+  const statFiles = hasDeployCommit
+    ? report?.deployFiles.length ?? session.deployFilesChanged
+    : session.filesChanged;
+  const statAdditions = hasDeployCommit
+    ? report?.additions ?? session.deployAdditions
+    : session.additions;
+  const statDeletions = hasDeployCommit
+    ? report?.deletions ?? session.deployDeletions
+    : session.deletions;
+  const alreadyInEnvironment = report?.alreadyInEnvironment ?? [];
 
   return (
     <article
@@ -846,13 +931,13 @@ function DeploymentSessionCard({
           <code>{shortSha(session.deploySha ?? session.squashSha)}</code>
         </div>
         <div>
-          <span>Archivos</span>
-          <strong>{session.filesChanged}</strong>
+          <span>{hasDeployCommit ? 'Archivos rama hija' : 'Archivos squash'}</span>
+          <strong>{statFiles}</strong>
         </div>
         <div>
           <span>Líneas</span>
           <strong>
-            +{session.additions} / −{session.deletions}
+            +{statAdditions} / −{statDeletions}
           </strong>
         </div>
         {pushed ? (
@@ -862,6 +947,44 @@ function DeploymentSessionCard({
           </div>
         ) : null}
       </div>
+
+      {report && report.squashFiles.length > 0 && alreadyInEnvironment.length > 0 ? (
+        <div className="deployment-report">
+          <div className="deployment-report-summary">
+            <Icon name="info" size={13} />
+            <span>
+              <strong>{alreadyInEnvironment.length}</strong> de{' '}
+              <strong>{report.squashFiles.length}</strong> archivo(s) del squash ya
+              están idénticos en <code>{session.targetBranch}</code>;{' '}
+              {hasDeployCommit
+                ? 'por eso no aparecen como cambios en la rama hija.'
+                : 'no necesitan resolverse: solo los demás archivos tienen cambios reales.'}
+            </span>
+          </div>
+          <details>
+            <summary>Ver archivos ya presentes en el ambiente</summary>
+            <ul>
+              {alreadyInEnvironment.map((file) => (
+                <li key={file}>
+                  <code title={file}>{truncateMiddle(file, 96)}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      ) : null}
+
+      {hasDeployCommit && report && report.deployFiles.length === 0 ? (
+        <div className="deployment-report is-empty">
+          <div className="deployment-report-summary">
+            <Icon name="check" size={13} />
+            <span>
+              El squash ya está completo en <code>{session.targetBranch}</code>: la rama
+              hija no agrega cambios netos.
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {conflict ? (
         <>
@@ -887,10 +1010,12 @@ function DeploymentSessionCard({
             {session.phase === 'deploy'
               ? 'El squash chocó con cambios ya presentes en la rama del ambiente.'
               : 'El squash chocó con cambios entre las ramas de los requerimientos.'}{' '}
-            Abre el worktree, resuelve los marcadores, guarda y agrega los archivos. La
-            rama <code>{expectedDeployBranch(session)}</code> ya está libre, pero el
-            conflicto vive en este worktree: resuélvelo aquí y no cambies esa rama en el
-            clon principal.
+            Resuelve cada archivo con <strong>Ambiente</strong> o{' '}
+            <strong>Requerimiento</strong>, o ábrelo en el editor y guarda la versión
+            final. FlowManager no deja continuar si quedan marcadores. La rama{' '}
+            <code>{expectedDeployBranch(session)}</code> ya está libre, pero el conflicto
+            vive en este worktree: resuélvelo aquí y no cambies esa rama en el clon
+            principal.
           </Callout>
 
           <div className="squash-conflict-actions">
@@ -954,6 +1079,28 @@ function DeploymentSessionCard({
                     title="Abrir en VS Code"
                   >
                     <Icon name="terminal" size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => onResolve(file, 'ours')}
+                    disabled={busy}
+                    title={
+                      session.phase === 'deploy'
+                        ? 'Quedarse con la versión del ambiente y descartar los cambios del requerimiento en este archivo'
+                        : 'Quedarse con la versión base del squash en este archivo'
+                    }
+                  >
+                    {session.phase === 'deploy' ? 'Ambiente' : 'Base'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => onResolve(file, 'theirs')}
+                    disabled={busy}
+                    title="Usar la versión del requerimiento y descartar la del ambiente en este archivo"
+                  >
+                    Requerimiento
                   </button>
                   <button
                     type="button"

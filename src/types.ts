@@ -361,9 +361,20 @@ export interface SquashSession {
   filesChanged: number;
   additions: number;
   deletions: number;
+  deployFilesChanged: number;
+  deployAdditions: number;
+  deployDeletions: number;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DeploymentReport {
+  squashFiles: string[];
+  alreadyInEnvironment: string[];
+  deployFiles: string[];
+  additions: number;
+  deletions: number;
 }
 
 export interface SquashPrepareInput {

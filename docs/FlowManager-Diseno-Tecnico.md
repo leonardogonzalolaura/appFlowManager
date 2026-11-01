@@ -2840,7 +2840,11 @@ Al final de cada fase: demo, tests verdes, documento actualizado y tu confirmaci
 - Nombre de rama: claves unidas + ambiente (`BPIM-139-BPIM-140-qas`); si excede 90 caracteres, `<primera-clave>-bundle-<short>-<ambiente>`.
 - La rama hija **no** lleva prefijo `feature/`: ese prefijo pertenece a la rama del requerimiento.
 - El worktree del despliegue trabaja en **HEAD detached**. La rama hija se crea como `refs/heads/<claves>-<ambiente>` sin quedar checkout, así TortoiseGit u otra herramienta pueden abrirla sin el error de “linked repository”. `deployment_push` verifica que la ref local siga en `deploy_sha` y empuja exactamente ese SHA (`<sha>:refs/heads/<rama>`); si la rama fue modificada externamente, rechaza el push para no sobrescribir trabajo.
-- Pruebas: 38 Rust (incluye apply, push real a remoto bare, base drift, guard de ambiente, rama libre durante conflicto, continue con HEAD detached y agrupación de lotes) y 11 frontend.
+- Estadísticas separadas: `files_changed/additions/deletions` describen el **squash**; `deploy_files_changed/deploy_additions/deploy_deletions` (migración `0010`) describen el **commit real de la rama hija** sobre el ambiente. La UI muestra “Archivos rama hija” para que no parezca que se perdieron archivos.
+- `deployment_report({ sessionId })` explica el delta: archivos que toca el squash, archivos que ya son idénticos en la rama del ambiente (no generan cambios en la rama hija) y archivos que realmente agrega el commit de despliegue. Es el caso típico cuando el ambiente ya contiene parte del trabajo del requerimiento.
+- Resolución de conflictos asistida: `squash_resolve_conflict({ sessionId, filePath, side })` con `side=ours` (versión del ambiente) o `side=theirs` (versión del requerimiento) hace `git checkout --ours|--theirs` + `git add`, sin pasar por un editor externo.
+- Guardas al continuar: se bloquea si quedan marcadores de conflicto (`<<<<<<<`, `=======`, `>>>>>>>`) en el índice y, si la resolución solo agrega líneas en blanco/espacios, la sesión termina como `no_changes` en lugar de crear un commit vacío.
+- Pruebas: 46 Rust (incluye apply, push real a remoto bare, base drift, guard de ambiente, rama libre durante conflicto, continue con HEAD detached, agrupación de lotes, reporte de archivos ya presentes, bloqueo por marcadores y resolución sin cambios netos) y 11 frontend.
 - Pendiente para completar la visión extendida: estado de PR vía GitHub API y push multi-repo paralelo.
 
 ### Fase 6 - Scripts BD y conexiones (4-5 días)
