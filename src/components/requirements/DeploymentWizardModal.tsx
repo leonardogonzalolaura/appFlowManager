@@ -307,8 +307,6 @@ export function DeploymentWizardModal({
       const commits = await loadDeploymentCommits(
         repo.repositoryId,
         repo.requirements.map((r) => r.requirementId),
-        repo.targetBranch || 'main',
-        repo.targetSha,
       );
       setRepoCommits((current) => ({
         ...current,
@@ -679,6 +677,7 @@ export function DeploymentWizardModal({
               <Icon name="trash" size={14} />
               Cancelar despliegue
             </button>
+            
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cerrar
             </button>
@@ -983,8 +982,8 @@ export function DeploymentWizardModal({
                                 {expanded ? (
                                   commits.length === 0 ? (
                                     <p className="deployment-commits-empty">
-                                      No hay commits pendientes entre la rama del
-                                      requerimiento y {repo.targetBranch ?? 'el ambiente'}.
+                                      La rama del requerimiento no tiene commits propios
+                                      respecto a su rama base.
                                     </p>
                                   ) : (
                                     <div className="deployment-commits-list">

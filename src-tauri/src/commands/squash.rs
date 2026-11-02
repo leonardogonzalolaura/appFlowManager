@@ -704,8 +704,6 @@ pub async fn deployment_prepare(
 pub struct DeploymentCommitsInput {
     pub repository_id: String,
     pub requirement_ids: Vec<String>,
-    pub target_branch: String,
-    pub target_sha: Option<String>,
 }
 
 #[tauri::command]
@@ -728,16 +726,22 @@ pub async fn deployment_load_commits(
     
     // Cargar commits de cada requerimiento
     for requirement_id in &input.requirement_ids {
-        let branch_name: String = sqlx::query_scalar(
-            "SELECT branch_name FROM requirement_repositories 
-             WHERE requirement_id = ?1 AND repository_id = ?2"
+        // La base es la rama configurada para el requerimiento (master/develop),
+        // no la rama del ambiente: así solo aparecen sus commits propios.
+        let (branch_name, base_branch, remote_name): (String, String, String) = sqlx::query_as(
+            "SELECT rr.branch_name,
+                    CASE WHEN trim(rr.base_branch) = '' THEN r.base_branch ELSE rr.base_branch END,
+                    r.remote_name
+             FROM requirement_repositories rr
+             JOIN repositories r ON r.id = rr.repository_id
+             WHERE rr.requirement_id = ?1 AND rr.repository_id = ?2",
         )
         .bind(requirement_id)
         .bind(&input.repository_id)
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::NotFound("rama del requerimiento".into()))?;
-        
+
         let requirement_key: String = sqlx::query_scalar(
             "SELECT external_key FROM requirements WHERE id = ?1"
         )
@@ -745,13 +749,13 @@ pub async fn deployment_load_commits(
         .fetch_optional(pool)
         .await?
         .unwrap_or_default();
-        
+
         // Cargar commits usando branch_ops
         let mut commits = branch_ops::collect_deployment_commits(
             Path::new(&repo_path),
             &branch_name,
-            &input.target_branch,
-            &input.target_sha,
+            &remote_name,
+            &base_branch,
             &requirement_key,
         )?;
 

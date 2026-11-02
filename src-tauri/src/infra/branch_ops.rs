@@ -297,17 +297,20 @@ fn collect_commits(
     commits
 }
 
-/// Carga commits de una rama de requerimiento respecto a la rama base del ambiente.
-/// Se usa en on-demand cuando el usuario quiere seleccionar commits específicos.
+/// Carga los commits propios de una rama de requerimiento respecto a su rama
+/// base (la misma que usa el análisis de la rama), no respecto a la rama del
+/// ambiente. Así una rama creada desde `master` y desplegada a `develop` no
+/// muestra todo el historial de `master` que aún no está en `develop`.
+/// Se usa on-demand cuando el usuario quiere seleccionar commits específicos.
 pub fn collect_deployment_commits(
     repo_path: &Path,
     branch_name: &str,
-    target_branch: &str,
-    target_sha: &Option<String>,
+    remote: &str,
+    base_branch: &str,
     requirement_key: &str,
 ) -> Result<Vec<BranchCommit>, crate::error::AppError> {
     let repo = open(repo_path)?;
-    
+
     // Resolver la rama local del requerimiento
     let branch_commit = repo
         .find_branch(branch_name, BranchType::Local)
@@ -316,30 +319,28 @@ pub fn collect_deployment_commits(
         .ok_or_else(|| crate::error::AppError::Validation(
             format!("La rama '{branch_name}' no existe localmente.")
         ))?;
-    
-    // Resolver la rama base del ambiente
-    let base_oid = if let Some(sha) = target_sha.as_ref() {
-        // Si tenemos el SHA exacto, úsalo
-        repo.revparse_single(sha)
-            .ok()
-            .and_then(|obj| obj.peel_to_commit().ok())
-            .map(|commit| commit.id())
-            .ok_or_else(|| crate::error::AppError::Validation(
-                format!("No se puede resolver el SHA '{sha}'")
-            ))?
-    } else {
-        // Si no, intenta resolver la rama
-        let (_, oid) = resolve_base(&repo, "origin", target_branch)?;
-        oid
-    };
-    
+
+    // Resolver la rama base del requerimiento (master/develop configurada al
+    // mapear el repositorio). Si la rama base divergió, se usa su ancestro común
+    // para no arrastrar commits de otra línea de historia.
+    let (_base_ref, mut base_oid) = resolve_base(&repo, remote, base_branch)?;
+    if base_oid != branch_commit.id()
+        && !repo
+            .graph_descendant_of(branch_commit.id(), base_oid)
+            .unwrap_or(false)
+    {
+        if let Ok(merge_base) = repo.merge_base(branch_commit.id(), base_oid) {
+            base_oid = merge_base;
+        }
+    }
+
     // Recolectar commits
     Ok(collect_commits(
         &repo,
         branch_commit.id(),
         base_oid,
         requirement_key,
-        50, // Mostrar hasta 50 commits
+        50,
     ))
 }
 
@@ -479,5 +480,39 @@ mod tests {
         init_repo(path);
         let analysis = analyze(path, "origin", "BPIM-404", "master", "BPIM-404").expect("analyze");
         assert_eq!(analysis.status, "branch_missing");
+    }
+
+    #[test]
+    fn deployment_commits_use_requirement_base_not_environment() {
+        let dir = tempfile::tempdir().expect("temp");
+        let path = dir.path();
+        let repo = init_repo(path);
+
+        // develop se separa de master y avanza por su cuenta.
+        let initial = repo
+            .find_branch("master", BranchType::Local)
+            .expect("master")
+            .get()
+            .peel_to_commit()
+            .expect("commit");
+        repo.branch("develop", &initial, false).expect("develop");
+        drop(initial);
+        add_commit(&repo, "develop", "feat: solo develop");
+
+        // master recibe un commit que develop todavía no tiene.
+        add_commit(&repo, "master", "feat: solo master");
+
+        // La rama del requerimiento nace de master y agrega un commit propio.
+        crate::infra::git_cli::create_branch(path, "feature/BPIM-900", "refs/heads/master")
+            .expect("create");
+        add_commit(&repo, "feature/BPIM-900", "feat(BPIM-900): cambio propio");
+
+        // La lista debe mostrar solo el commit del requerimiento, no el de
+        // master que aún no está en develop (comportamiento anterior).
+        let commits =
+            collect_deployment_commits(path, "feature/BPIM-900", "origin", "master", "BPIM-900")
+                .expect("commits");
+        assert_eq!(commits.len(), 1, "{commits:?}");
+        assert_eq!(commits[0].summary, "feat(BPIM-900): cambio propio");
     }
 }

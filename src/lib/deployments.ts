@@ -46,16 +46,12 @@ export async function prepareDeployment(
 export async function loadDeploymentCommits(
   repositoryId: string,
   requirementIds: string[],
-  targetBranch: string,
-  targetSha: string | null,
 ): Promise<BranchCommit[]> {
   requireDesktop();
   return invoke<BranchCommit[]>('deployment_load_commits', {
     input: {
       repositoryId,
       requirementIds,
-      targetBranch,
-      targetSha,
     },
   });
 }
