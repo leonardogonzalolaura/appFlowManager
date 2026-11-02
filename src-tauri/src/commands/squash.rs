@@ -117,6 +117,24 @@ pub struct SquashOpenInput {
 pub struct DeploymentPreviewInput {
     pub requirement_ids: Vec<String>,
     pub environment: String,
+    pub strategy: Option<String>,
+    pub selected_commits: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoCommitsConfig {
+    pub repository_id: String,
+    pub strategy: String, // 'all_commits' o 'selected_commits'
+    pub selected_commits: Vec<String>, // SHAs de commits seleccionados
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentPrepareInput {
+    pub requirement_ids: Vec<String>,
+    pub environment: String,
+    pub repo_configs: Option<Vec<RepoCommitsConfig>>, // Nueva: estrategia por repo
 }
 
 #[derive(Debug, Serialize)]
@@ -500,12 +518,6 @@ async fn prepare_squash(
             .collect();
         shas.sort();
         shas.dedup();
-        if shas.is_empty() {
-            return Err(AppError::Validation(
-                "Selecciona al menos un commit para el squash.".into(),
-            )
-            .into());
-        }
         for sha in &shas {
             if !allowed.contains(sha) {
                 return Err(AppError::Validation(format!(
@@ -528,6 +540,8 @@ async fn prepare_squash(
                     .unwrap_or_else(Utc::now)
                     .to_rfc3339_opts(SecondsFormat::Secs, true),
                 is_foreign: false,
+                source_branch: None,
+                requirement_key: None,
             });
         }
         selected_commits.sort_by(|left, right| {
@@ -670,10 +684,94 @@ pub async fn deployment_preview(
 #[tauri::command]
 pub async fn deployment_prepare(
     state: State<'_, AppState>,
-    input: DeploymentPreviewInput,
+    input: DeploymentPrepareInput,
 ) -> Result<Vec<SquashSession>, ApiError> {
     let pool = state.pool()?;
-    prepare_deployment(pool, &state.paths.worktrees_dir, input).await
+    
+    // Convertir a DeploymentPreviewInput para carga de datos
+    let preview_input = DeploymentPreviewInput {
+        requirement_ids: input.requirement_ids.clone(),
+        environment: input.environment.clone(),
+        strategy: None,
+        selected_commits: None,
+    };
+    
+    prepare_deployment(pool, &state.paths.worktrees_dir, preview_input, input.repo_configs).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentCommitsInput {
+    pub repository_id: String,
+    pub requirement_ids: Vec<String>,
+    pub target_branch: String,
+    pub target_sha: Option<String>,
+}
+
+#[tauri::command]
+pub async fn deployment_load_commits(
+    state: State<'_, AppState>,
+    input: DeploymentCommitsInput,
+) -> Result<Vec<BranchCommit>, ApiError> {
+    let pool = state.pool()?;
+    
+    // Cargar la ruta local del repo
+    let repo_path: String = sqlx::query_scalar(
+        "SELECT local_path FROM repositories WHERE id = ?1 AND is_active = 1"
+    )
+    .bind(&input.repository_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("repositorio".into()))?;
+    
+    let mut all_commits = Vec::new();
+    
+    // Cargar commits de cada requerimiento
+    for requirement_id in &input.requirement_ids {
+        let branch_name: String = sqlx::query_scalar(
+            "SELECT branch_name FROM requirement_repositories 
+             WHERE requirement_id = ?1 AND repository_id = ?2"
+        )
+        .bind(requirement_id)
+        .bind(&input.repository_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("rama del requerimiento".into()))?;
+        
+        let requirement_key: String = sqlx::query_scalar(
+            "SELECT external_key FROM requirements WHERE id = ?1"
+        )
+        .bind(requirement_id)
+        .fetch_optional(pool)
+        .await?
+        .unwrap_or_default();
+        
+        // Cargar commits usando branch_ops
+        let mut commits = branch_ops::collect_deployment_commits(
+            Path::new(&repo_path),
+            &branch_name,
+            &input.target_branch,
+            &input.target_sha,
+            &requirement_key,
+        )?;
+
+        // Cada commit queda identificado con la rama del requerimiento que lo
+        // aporta; la UI lo muestra cuando el repositorio es compartido.
+        for commit in &mut commits {
+            commit.source_branch = Some(branch_name.clone());
+            if !requirement_key.is_empty() {
+                commit.requirement_key = Some(requirement_key.clone());
+            }
+        }
+
+        all_commits.extend(commits);
+    }
+    
+    // Deduplicar por SHA
+    let mut seen = HashSet::new();
+    all_commits.retain(|commit| seen.insert(commit.sha.clone()));
+    
+    Ok(all_commits)
 }
 
 /// Vuelve a preparar un lote completo con los mismos requerimientos y
@@ -720,7 +818,10 @@ pub async fn deployment_batch_retry(
         DeploymentPreviewInput {
             requirement_ids,
             environment,
+            strategy: None,
+            selected_commits: None,
         },
+        None,
     )
     .await
 }
@@ -729,6 +830,7 @@ async fn prepare_deployment(
     pool: &SqlitePool,
     worktrees_dir: &Path,
     input: DeploymentPreviewInput,
+    repo_configs: Option<Vec<RepoCommitsConfig>>,
 ) -> Result<Vec<SquashSession>, ApiError> {
     environment_label(pool, &input.environment).await?;
     let rows = load_deployment_rows(pool, &input.requirement_ids, &input.environment).await?;
@@ -755,6 +857,13 @@ async fn prepare_deployment(
 
     let mut sessions = Vec::new();
     let batch_id = Uuid::now_v7().to_string();
+    let strategy = input.strategy.as_deref().unwrap_or("all_commits");
+    let configs_by_repo = repo_configs
+        .iter()
+        .flatten()
+        .map(|config| (config.repository_id.clone(), config))
+        .collect::<std::collections::HashMap<_, _>>();
+    
     for repository in repositories {
         let Some(target_branch) = repository.target_branch.clone() else {
             continue;
@@ -764,14 +873,22 @@ async fn prepare_deployment(
             .iter()
             .map(|requirement| requirement.requirement_id.clone())
             .collect::<Vec<_>>();
+        
+        // Obtener config específica para este repo, si existe
+        let (repo_strategy, repo_commits) = if let Some(config) = configs_by_repo.get(&repository.repository_id) {
+            (config.strategy.as_str(), Some(config.selected_commits.clone()))
+        } else {
+            (strategy, input.selected_commits.clone())
+        };
+        
         let session = prepare_squash(
             pool,
             worktrees_dir,
             SquashPrepareInput {
                 repository_id: repository.repository_id,
                 requirement_ids,
-                strategy: "all_commits".into(),
-                commit_shas: None,
+                strategy: repo_strategy.to_string(),
+                commit_shas: repo_commits,
                 message: None,
             },
             Some(input.environment.clone()),
@@ -1088,8 +1205,43 @@ async fn apply_deployment_with(
     // cherry-pick para no arrastrar cambios ajenos si el ambiente divergió.
     let run = squash_ops::cherry_pick_no_commit(worktree, &squash_sha)?;
     if !run.success {
-        let conflicts = squash_ops::unmerged_files(worktree)?;
-        if !conflicts.is_empty() {
+        let _conflicts = squash_ops::unmerged_files(worktree)?;
+        
+        // Primero, abortar el cherry-pick para limpiar el estado
+        let _ = squash_ops::cherry_pick_quit(worktree);
+        
+        // Después, verificar si realmente hay cambios
+        // Caso especial: cuando cherry-pick falla, verificar si realmente hay cambios
+        // que merecen ser considerados un conflicto. Si no hay cambios staged
+        // significativos, es que todo ya estaba en el ambiente (cambios fantasma).
+        let has_changes = squash_ops::has_staged_changes(worktree)?
+            && squash_ops::has_meaningful_staged_changes(worktree)?;
+        
+        if !has_changes {
+            // No hay cambios netos, aunque haya archivos marcados como unmerged
+            sqlx::query(
+                "UPDATE squash_sessions
+                 SET phase = 'deploy', status = 'no_changes', environment = ?1,
+                     target_branch = ?2, target_base_sha = ?3, deploy_branch = ?4,
+                     deploy_sha = ?3, conflicts_json = '[]',
+                     deploy_files_changed = 0, deploy_additions = 0, deploy_deletions = 0,
+                     updated_at = ?5
+                 WHERE id = ?6",
+            )
+            .bind(&environment)
+            .bind(&target_branch)
+            .bind(&target_base_sha)
+            .bind(&deploy_branch)
+            .bind(now())
+            .bind(&session.id)
+            .execute(pool)
+            .await?;
+            return Ok(load_session(pool, &session.id).await?.into_dto());
+        }
+        
+        // Si después de limpiar todavía hay archivos unmerged, es un conflicto real
+        let unmerged_after_quit = squash_ops::unmerged_files(worktree)?;
+        if !unmerged_after_quit.is_empty() {
             sqlx::query(
                 "UPDATE squash_sessions
                  SET phase = 'deploy', status = 'conflict', environment = ?1,
@@ -1101,13 +1253,14 @@ async fn apply_deployment_with(
             .bind(&target_branch)
             .bind(&target_base_sha)
             .bind(&deploy_branch)
-            .bind(serde_json::to_string(&conflicts).unwrap_or_else(|_| "[]".into()))
+            .bind(serde_json::to_string(&unmerged_after_quit).unwrap_or_else(|_| "[]".into()))
             .bind(now())
             .bind(&session.id)
             .execute(pool)
             .await?;
             return Ok(load_session(pool, &session.id).await?.into_dto());
         }
+        
         return fail_deployment_session(
             pool,
             &session.id,
@@ -1115,30 +1268,6 @@ async fn apply_deployment_with(
                 .to_string(),
         )
         .await;
-    }
-
-    if !squash_ops::has_staged_changes(worktree)?
-        || !squash_ops::has_meaningful_staged_changes(worktree)?
-    {
-        let _ = squash_ops::cherry_pick_quit(worktree);
-        sqlx::query(
-            "UPDATE squash_sessions
-             SET phase = 'deploy', status = 'no_changes', environment = ?1,
-                 target_branch = ?2, target_base_sha = ?3, deploy_branch = ?4,
-                 deploy_sha = ?3, conflicts_json = '[]',
-                 deploy_files_changed = 0, deploy_additions = 0, deploy_deletions = 0,
-                 updated_at = ?5
-             WHERE id = ?6",
-        )
-        .bind(&environment)
-        .bind(&target_branch)
-        .bind(&target_base_sha)
-        .bind(&deploy_branch)
-        .bind(now())
-        .bind(&session.id)
-        .execute(pool)
-        .await?;
-        return Ok(load_session(pool, &session.id).await?.into_dto());
     }
 
     let run = squash_ops::commit_final(worktree, &session.message)?;

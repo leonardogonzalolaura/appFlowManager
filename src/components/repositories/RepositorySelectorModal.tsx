@@ -422,10 +422,11 @@ export function RepositorySelectorModal({
     );
   };
 
+  if (!open) return null;
+
   return (
     <Modal
-      open={open}
-      onClose={onClose}
+      onClose={busy ? () => undefined : onClose}
       size="lg"
       title={selectedMode === 'selector' ? 'Seleccionar repositorio' : 'Agregar repositorio'}
       description={
@@ -435,7 +436,6 @@ export function RepositorySelectorModal({
             ? 'Agrega un repositorio local existente'
             : 'Clona un repositorio desde una URL remota'
       }
-      onClose={busy ? () => undefined : onClose}
     >
       <div className="repository-selector-modal">
         {selectedMode === 'selector' ? renderList() : renderForm()}

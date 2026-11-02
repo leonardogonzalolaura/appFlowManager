@@ -98,6 +98,7 @@ pub fn run() {
             commands::squash::squash_open_folder,
             commands::squash::deployment_preview,
             commands::squash::deployment_prepare,
+            commands::squash::deployment_load_commits,
             commands::squash::deployment_apply,
             commands::squash::deployment_report,
             commands::squash::deployment_push,

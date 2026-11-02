@@ -5,6 +5,7 @@ import { copyText, formatDateTime, shortSha, truncateMiddle } from '../../lib/fo
 import {
   applyDeployment,
   getDeploymentReport,
+  loadDeploymentCommits,
   prepareDeployment,
   previewDeployment,
   pushDeployment,
@@ -23,7 +24,9 @@ import {
 } from '../../lib/squash';
 import type {
   ApiError,
+  BranchCommit,
   DeploymentPreview,
+  DeploymentRepoGroup,
   DeploymentReport,
   EnvironmentDefinition,
   SquashSession,
@@ -79,6 +82,13 @@ export function DeploymentWizardModal({
     session: SquashSession;
     branch: string;
   } | null>(null);
+  
+  // Por-repo strategy y commits seleccionados
+  const [repoStrategy, setRepoStrategy] = useState<Record<string, 'all_commits' | 'selected_commits'>>({});
+  const [selectedCommits, setSelectedCommits] = useState<Record<string, Set<string>>>({});
+  const [expandedRepos, setExpandedRepos] = useState<Record<string, boolean>>({});
+  const [repoCommits, setRepoCommits] = useState<Record<string, BranchCommit[]>>({});
+  const [loadingCommits, setLoadingCommits] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let active = true;
@@ -194,11 +204,40 @@ export function DeploymentWizardModal({
   }
 
   async function prepare() {
-    if (!environment) return;
+    if (!environment || !preview) return;
+
+    const withoutSelection = preview.repositories.filter(
+      (repo) =>
+        (repoStrategy[repo.repositoryId] ?? 'all_commits') === 'selected_commits' &&
+        (selectedCommits[repo.repositoryId]?.size ?? 0) === 0,
+    );
+    if (withoutSelection.length > 0) {
+      setError({
+        code: 'NO_COMMITS_SELECTED',
+        message: `Selecciona al menos un commit en: ${withoutSelection
+          .map((repo) => repo.repositoryName)
+          .join(', ')}.`,
+        retryable: false,
+      });
+      return;
+    }
+
     setPreparing(true);
     setError(null);
     try {
-      const created = await prepareDeployment(requirementIds, environment);
+      const repoConfigs = preview.repositories.map((repo) => {
+        const strategy = repoStrategy[repo.repositoryId] ?? 'all_commits';
+        return {
+          repositoryId: repo.repositoryId,
+          strategy,
+          selectedCommits:
+            strategy === 'selected_commits'
+              ? Array.from(selectedCommits[repo.repositoryId] ?? new Set())
+              : [],
+        };
+      });
+
+      const created = await prepareDeployment(requirementIds, environment, repoConfigs);
       setSessions(created);
       onChanged();
       const conflicts = created.filter((session) => session.status === 'conflict');
@@ -216,6 +255,103 @@ export function DeploymentWizardModal({
     } finally {
       setPreparing(false);
     }
+  }
+
+  function toggleRepoStrategy(repoId: string) {
+    const currentStrategy = repoStrategy[repoId] ?? 'all_commits';
+    const newStrategy = currentStrategy === 'selected_commits' ? 'all_commits' : 'selected_commits';
+    
+    setRepoStrategy((current) => ({
+      ...current,
+      [repoId]: newStrategy,
+    }));
+    
+    // Si cambió a 'selected_commits', cargar commits y expandir
+    if (newStrategy === 'selected_commits') {
+      const repo = preview?.repositories.find((r) => r.repositoryId === repoId);
+      if (repo) {
+        if (!repoCommits[repoId]) {
+          void loadCommitsForRepo(repo);
+        }
+        setExpandedRepos((current) => ({ ...current, [repoId]: true }));
+      }
+    }
+  }
+
+  function toggleCommit(repoId: string, commitSha: string) {
+    setError((current) =>
+      current?.code === 'NO_COMMITS_SELECTED' ? null : current,
+    );
+    setSelectedCommits((current) => {
+      const repoCommits = current[repoId] ?? new Set();
+      const next = new Set(repoCommits);
+      if (next.has(commitSha)) {
+        next.delete(commitSha);
+      } else {
+        next.add(commitSha);
+      }
+      return {
+        ...current,
+        [repoId]: next,
+      };
+    });
+  }
+
+  async function loadCommitsForRepo(repo: DeploymentRepoGroup): Promise<void> {
+    if (loadingCommits[repo.repositoryId] || repoCommits[repo.repositoryId]) {
+      return;
+    }
+
+    setLoadingCommits((current) => ({ ...current, [repo.repositoryId]: true }));
+    try {
+      const commits = await loadDeploymentCommits(
+        repo.repositoryId,
+        repo.requirements.map((r) => r.requirementId),
+        repo.targetBranch || 'main',
+        repo.targetSha,
+      );
+      setRepoCommits((current) => ({
+        ...current,
+        [repo.repositoryId]: commits,
+      }));
+      // Por defecto se incluyen todos: si el usuario no toca nada, el resultado
+      // es el mismo que "Todos los commits".
+      setSelectedCommits((current) => ({
+        ...current,
+        [repo.repositoryId]: new Set(commits.map((commit) => commit.sha)),
+      }));
+    } catch (caught) {
+      setError(normalizeError(caught));
+    } finally {
+      setLoadingCommits((current) => ({ ...current, [repo.repositoryId]: false }));
+    }
+  }
+
+  function selectAllCommits(repoId: string) {
+    setError((current) =>
+      current?.code === 'NO_COMMITS_SELECTED' ? null : current,
+    );
+    const commits = repoCommits[repoId] ?? [];
+    setSelectedCommits((current) => ({
+      ...current,
+      [repoId]: new Set(commits.map((commit) => commit.sha)),
+    }));
+  }
+
+  function clearSelectedCommits(repoId: string) {
+    setSelectedCommits((current) => ({
+      ...current,
+      [repoId]: new Set(),
+    }));
+  }
+
+  function toggleRepoExpanded(repoId: string) {
+    setExpandedRepos((current) => ({
+      ...current,
+      [repoId]: !current[repoId],
+    }));
+    const repo = preview?.repositories.find((r) => r.repositoryId === repoId);
+    if (repo) void loadCommitsForRepo(repo);
   }
 
   async function apply(
@@ -582,6 +718,44 @@ export function DeploymentWizardModal({
         )
       }
     >
+      {error ? (
+        <div className="deployment-error-banner">
+          <Callout
+            tone="danger"
+            title={
+              sessions.length === 0
+                ? 'No se pudo preparar el despliegue'
+                : 'El despliegue se detuvo'
+            }
+            action={
+              <div className="deployment-error-actions">
+                {sessions.length > 0 ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void restartPreparation()}
+                    disabled={Object.keys(busy).length > 0}
+                  >
+                    <Icon name="refresh" size={13} />
+                    Volver a preparar
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-icon btn-ghost btn-sm"
+                  aria-label="Descartar aviso"
+                  onClick={() => setError(null)}
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              </div>
+            }
+          >
+            {error.message}
+          </Callout>
+        </div>
+      ) : null}
+
       {sessions.length === 0 ? (
         <div className="deployment-setup">
           <div className="field">
@@ -616,7 +790,9 @@ export function DeploymentWizardModal({
             <div className="env-manager-loading">
               <Spinner size="md" label="Analizando repositorios y ramas…" />
             </div>
-          ) : preview ? (
+          ) : null}
+
+          {preview && !loadingPreview ? (
             <>
               <div className="deployment-summary">
                 <div className="deployment-stat">
@@ -714,6 +890,152 @@ export function DeploymentWizardModal({
                           </span>
                         ))}
                       </div>
+
+                      {repo.available && (
+                        <div className="deployment-repo-strategy">
+                          <div className="strategy-toggle">
+                            <button
+                              type="button"
+                              className={`strategy-btn ${(repoStrategy[repo.repositoryId] ?? 'all_commits') === 'all_commits' ? 'is-active' : ''}`}
+                              onClick={() => {
+                                if (repoStrategy[repo.repositoryId] === 'selected_commits') {
+                                  toggleRepoStrategy(repo.repositoryId);
+                                }
+                              }}
+                            >
+                              <Icon name="branch" size={13} />
+                              Todos los commits
+                            </button>
+                            <button
+                              type="button"
+                              className={`strategy-btn ${(repoStrategy[repo.repositoryId] ?? 'all_commits') === 'selected_commits' ? 'is-active' : ''}`}
+                              onClick={() => {
+                                if (repoStrategy[repo.repositoryId] !== 'selected_commits') {
+                                  toggleRepoStrategy(repo.repositoryId);
+                                }
+                              }}
+                            >
+                              <Icon name="check" size={13} />
+                              Commits específicos
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {repo.available && repoStrategy[repo.repositoryId] === 'selected_commits' && (() => {
+                        const commits = repoCommits[repo.repositoryId] ?? [];
+                        const selected = selectedCommits[repo.repositoryId] ?? new Set<string>();
+                        const expanded = Boolean(expandedRepos[repo.repositoryId]);
+                        // Con un solo requerimiento la rama es obvia; con repos
+                        // compartidos cada commit debe decir de dónde viene.
+                        const sharedRepository = repo.requirements.length > 1;
+                        return (
+                          <div className="deployment-repo-commits">
+                            {loadingCommits[repo.repositoryId] ? (
+                              <div className="deployment-commits-loading">
+                                <Spinner size="sm" />
+                                <span>Cargando commits...</span>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="deployment-commits-head">
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-ghost"
+                                    onClick={() => void toggleRepoExpanded(repo.repositoryId)}
+                                  >
+                                    <Icon
+                                      name={expanded ? 'chevron-down' : 'chevron-right'}
+                                      size={14}
+                                    />
+                                    {commits.length} commit{commits.length === 1 ? '' : 's'}
+                                    <span className="deployment-commits-count">
+                                      {selected.size}/{commits.length}
+                                    </span>
+                                  </button>
+                                  {expanded && commits.length > 0 ? (
+                                    <div className="deployment-commits-actions">
+                                      <button
+                                        type="button"
+                                        className="btn btn-xs btn-ghost"
+                                        onClick={() => selectAllCommits(repo.repositoryId)}
+                                        disabled={selected.size === commits.length}
+                                      >
+                                        Todos
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-xs btn-ghost"
+                                        onClick={() => clearSelectedCommits(repo.repositoryId)}
+                                        disabled={selected.size === 0}
+                                      >
+                                        Ninguno
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                                {expanded && commits.length > 0 && selected.size === 0 ? (
+                                  <p className="deployment-commits-warning">
+                                    <Icon name="alert" size={12} />
+                                    Selecciona al menos un commit de este repositorio.
+                                  </p>
+                                ) : null}
+                                {expanded ? (
+                                  commits.length === 0 ? (
+                                    <p className="deployment-commits-empty">
+                                      No hay commits pendientes entre la rama del
+                                      requerimiento y {repo.targetBranch ?? 'el ambiente'}.
+                                    </p>
+                                  ) : (
+                                    <div className="deployment-commits-list">
+                                      {commits.map((commit) => (
+                                        <label
+                                          key={commit.sha}
+                                          className="deployment-commit-item"
+                                          title={`${commit.author ?? '—'} · ${formatDateTime(commit.committedAt)}`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={selected.has(commit.sha)}
+                                            onChange={() =>
+                                              toggleCommit(repo.repositoryId, commit.sha)
+                                            }
+                                          />
+                                          <code className="commit-sha">
+                                            {shortSha(commit.sha)}
+                                          </code>
+                                          <span className="commit-summary">
+                                            {commit.summary}
+                                          </span>
+                                          {sharedRepository && commit.sourceBranch ? (
+                                            <span
+                                              className="commit-source"
+                                              title={`${commit.requirementKey ?? 'Requerimiento'} · ${commit.sourceBranch}${
+                                                commit.isForeign
+                                                  ? ' · el mensaje no menciona la clave'
+                                                  : ''
+                                              }`}
+                                            >
+                                              <StatusChip
+                                                tone="neutral"
+                                                className="commit-branch-chip"
+                                              >
+                                                {truncateMiddle(commit.sourceBranch, 28)}
+                                              </StatusChip>
+                                            </span>
+                                          ) : commit.isForeign ? (
+                                            <StatusChip tone="warning">Ajeno</StatusChip>
+                                          ) : null}
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -735,12 +1057,6 @@ export function DeploymentWizardModal({
               requerimientos.
             </Callout>
           )}
-
-          {error ? (
-            <Callout tone="danger" title="No se pudo preparar el despliegue">
-              {error.message}
-            </Callout>
-          ) : null}
         </div>
       ) : (
         <div className="deployment-sessions">
@@ -805,23 +1121,6 @@ export function DeploymentWizardModal({
             <Callout tone="warning" title="Hay conflictos pendientes">
               Las acciones masivas están pausadas. Resuelve los archivos conflictivos y
               usa “Continuar” en cada repositorio.
-            </Callout>
-          ) : null}
-
-          {error ? (
-            <Callout tone="danger" title="El despliegue se detuvo">
-              {error.message}
-              <div className="deployment-restart">
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => void restartPreparation()}
-                  disabled={Object.keys(busy).length > 0}
-                >
-                  <Icon name="refresh" size={13} />
-                  Volver a preparar
-                </button>
-              </div>
             </Callout>
           ) : null}
 

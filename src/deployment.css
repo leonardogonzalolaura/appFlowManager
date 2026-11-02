@@ -450,3 +450,204 @@
   align-items: center;
   gap: 6px;
 }
+
+
+
+/* Strategy toggle para seleccionar commits específicos */
+.deployment-repo-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.strategy-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.strategy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.strategy-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.strategy-btn.is-active {
+  background: linear-gradient(180deg, rgba(124, 140, 255, 0.2), rgba(124, 140, 255, 0.1));
+  border-color: var(--accent-border);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(124, 140, 255, 0.2);
+}
+
+.strategy-btn.is-active:hover {
+  background: linear-gradient(180deg, rgba(124, 140, 255, 0.25), rgba(124, 140, 255, 0.15));
+}
+
+.strategy-btn svg {
+  opacity: 0.9;
+}
+
+.strategy-btn.is-active svg {
+  opacity: 1;
+}
+
+/* Commits list */
+.deployment-repo-commits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 6px;
+  background: rgba(255, 255, 255, 0.01);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-soft);
+}
+
+.deployment-commits-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+.deployment-commits-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.deployment-commits-head .btn {
+  padding-left: 2px;
+}
+
+.deployment-commits-count {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.deployment-commits-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.deployment-commits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.deployment-commit-item {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 80ms ease;
+  font-size: 9.5px;
+}
+
+.deployment-commit-item:hover {
+  background: rgba(124, 140, 255, 0.08);
+}
+
+.deployment-commit-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.deployment-commit-item .commit-sha {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.deployment-commit-item .commit-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.deployment-commit-item .commit-source {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 210px;
+}
+
+.commit-branch-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 9px;
+}
+
+.deployment-commits-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 2px 0;
+  color: var(--yellow);
+  font-size: 9.5px;
+}
+
+.deployment-error-banner {
+  position: sticky;
+  top: -18px;
+  z-index: 5;
+  margin: -18px 0 12px;
+  padding-top: 18px;
+  background: var(--bg-surface);
+}
+
+.deployment-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deployment-commits-empty {
+  margin: 0;
+  padding: 6px 4px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}

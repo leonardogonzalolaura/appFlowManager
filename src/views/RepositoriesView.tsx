@@ -8,7 +8,7 @@ import {
   removeRepository,
   setEnvironment,
 } from '../lib/repositories';
-import type { EnvironmentState, RepositoryDetail, RepositorySummary } from '../types';
+import type { EnvironmentState, RepositoryDetail } from '../types';
 import { useRepositories } from '../hooks/useRepositories';
 import { BranchPickerModal } from '../components/repositories/BranchPickerModal';
 import { EditRepositoryModal } from '../components/repositories/EditRepositoryModal';

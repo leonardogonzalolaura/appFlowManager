@@ -12,6 +12,13 @@ pub struct BranchCommit {
     pub author: Option<String>,
     pub committed_at: String,
     pub is_foreign: bool,
+    /// Rama del requerimiento de la que proviene el commit. Solo se completa en
+    /// la selección de commits de un despliegue con repositorios compartidos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_branch: Option<String>,
+    /// Clave del requerimiento dueño de esa rama, para contexto en la UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirement_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,7 +233,7 @@ fn open(repo_path: &Path) -> Result<Repository, AppError> {
     })
 }
 
-fn resolve_base(
+pub fn resolve_base(
     repo: &Repository,
     remote: &str,
     base_branch: &str,
@@ -283,9 +290,57 @@ fn collect_commits(
                 && !full_message
                     .to_lowercase()
                     .contains(&requirement_key.to_lowercase()),
+            source_branch: None,
+            requirement_key: None,
         });
     }
     commits
+}
+
+/// Carga commits de una rama de requerimiento respecto a la rama base del ambiente.
+/// Se usa en on-demand cuando el usuario quiere seleccionar commits específicos.
+pub fn collect_deployment_commits(
+    repo_path: &Path,
+    branch_name: &str,
+    target_branch: &str,
+    target_sha: &Option<String>,
+    requirement_key: &str,
+) -> Result<Vec<BranchCommit>, crate::error::AppError> {
+    let repo = open(repo_path)?;
+    
+    // Resolver la rama local del requerimiento
+    let branch_commit = repo
+        .find_branch(branch_name, BranchType::Local)
+        .ok()
+        .and_then(|branch| branch.get().peel_to_commit().ok())
+        .ok_or_else(|| crate::error::AppError::Validation(
+            format!("La rama '{branch_name}' no existe localmente.")
+        ))?;
+    
+    // Resolver la rama base del ambiente
+    let base_oid = if let Some(sha) = target_sha.as_ref() {
+        // Si tenemos el SHA exacto, úsalo
+        repo.revparse_single(sha)
+            .ok()
+            .and_then(|obj| obj.peel_to_commit().ok())
+            .map(|commit| commit.id())
+            .ok_or_else(|| crate::error::AppError::Validation(
+                format!("No se puede resolver el SHA '{sha}'")
+            ))?
+    } else {
+        // Si no, intenta resolver la rama
+        let (_, oid) = resolve_base(&repo, "origin", target_branch)?;
+        oid
+    };
+    
+    // Recolectar commits
+    Ok(collect_commits(
+        &repo,
+        branch_commit.id(),
+        base_oid,
+        requirement_key,
+        50, // Mostrar hasta 50 commits
+    ))
 }
 
 fn delta_status(status: git2::Delta) -> String {

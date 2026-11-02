@@ -251,6 +251,10 @@ export interface BranchCommit {
   author: string | null;
   committedAt: string;
   isForeign: boolean;
+  /** Rama del requerimiento que aporta el commit (selección de despliegue). */
+  sourceBranch?: string | null;
+  /** Clave del requerimiento dueño de esa rama. */
+  requirementKey?: string | null;
 }
 
 export interface BranchCheck {

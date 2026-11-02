@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from './api';
 import type {
+  BranchCommit,
   DeploymentBatchSummary,
   DeploymentPreview,
   DeploymentReport,
@@ -30,10 +31,32 @@ export async function previewDeployment(
 export async function prepareDeployment(
   requirementIds: string[],
   environment: string,
+  repoConfigs?: Array<{ repositoryId: string; strategy: string; selectedCommits: string[] }>,
 ): Promise<SquashSession[]> {
   requireDesktop();
   return invoke<SquashSession[]>('deployment_prepare', {
-    input: { requirementIds, environment },
+    input: {
+      requirementIds,
+      environment,
+      repoConfigs: repoConfigs || [],
+    },
+  });
+}
+
+export async function loadDeploymentCommits(
+  repositoryId: string,
+  requirementIds: string[],
+  targetBranch: string,
+  targetSha: string | null,
+): Promise<BranchCommit[]> {
+  requireDesktop();
+  return invoke<BranchCommit[]>('deployment_load_commits', {
+    input: {
+      repositoryId,
+      requirementIds,
+      targetBranch,
+      targetSha,
+    },
   });
 }
 
