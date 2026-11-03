@@ -22,6 +22,7 @@ import type {
   SquashSession,
 } from '../../types';
 import { Callout } from '../ui/Callout';
+import { ConfirmModal } from '../ui/ConfirmModal';
 import { Icon } from '../ui/Icon';
 import { Modal } from '../ui/Modal';
 import { Spinner } from '../ui/Spinner';
@@ -50,6 +51,8 @@ export function SquashWizardModal({ onClose, onChanged }: SquashWizardModalProps
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [discardTarget, setDiscardTarget] = useState<SquashSession | null>(null);
+  const [discarding, setDiscarding] = useState(false);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -284,22 +287,38 @@ export function SquashWizardModal({ onClose, onChanged }: SquashWizardModalProps
     }
   }
 
-  async function handleAbort() {
-    if (!activeSession) return;
+  async function discardSession(session: SquashSession) {
     try {
-      const updated = await abortSquash(activeSession.id);
-      setActiveSession(updated);
+      const updated = await abortSquash(session.id);
       setSessions((current) =>
-        current.map((session) => (session.id === updated.id ? updated : session)),
+        current.map((item) => (item.id === updated.id ? updated : item)),
       );
+      setActiveSession((current) => (current?.id === updated.id ? updated : current));
       onChanged();
-      toast.success('Squash abortado', {
-        description: 'El worktree y la rama interna se eliminaron.',
+      toast.success('Squash descartado', {
+        description:
+          'El worktree y la rama interna se eliminaron. Tus ramas originales siguen intactas.',
       });
+      return true;
     } catch (caught) {
       const apiError = normalizeError(caught);
-      toast.error('No se pudo abortar', { description: apiError.message });
+      toast.error('No se pudo descartar', { description: apiError.message });
+      await loadSessions();
+      return false;
     }
+  }
+
+  async function handleAbort() {
+    if (!activeSession) return;
+    await discardSession(activeSession);
+  }
+
+  async function handleConfirmDiscard() {
+    if (!discardTarget) return;
+    setDiscarding(true);
+    await discardSession(discardTarget);
+    setDiscardTarget(null);
+    setDiscarding(false);
   }
 
   async function handleRefreshConflicts() {
@@ -358,7 +377,7 @@ export function SquashWizardModal({ onClose, onChanged }: SquashWizardModalProps
       description={
         activeSession
           ? `${activeSession.baseBranch} · ${activeSession.internalBranch}`
-          : 'Unifica uno o varios requerimientos del mismo repositorio en un solo commit aislado.'
+          : 'Vista previa: unifica uno o varios requerimientos del mismo repositorio en un commit aislado. No despliega; para eso usa "Preparar despliegue".'
       }
       size="lg"
       icon={<Icon name="package" size={20} />}
@@ -410,23 +429,33 @@ export function SquashWizardModal({ onClose, onChanged }: SquashWizardModalProps
                 <span className="req-section-meta">{activeSessions.length}</span>
               </div>
               {activeSessions.map((session) => (
-                <button
-                  key={session.id}
-                  type="button"
-                  className="squash-session-card"
-                  onClick={() => setActiveSession(session)}
-                >
-                  <span>
-                    <strong>{session.repositoryName}</strong>
-                    <small>
-                      {session.internalBranch} · {formatDateTime(session.updatedAt)}
-                    </small>
-                  </span>
-                  <StatusChip tone={sessionTone(session.status)}>
-                    {sessionLabel(session.status)}
-                  </StatusChip>
-                  <Icon name="chevron-right" size={13} />
-                </button>
+                <div key={session.id} className="squash-session-card">
+                  <button
+                    type="button"
+                    className="squash-session-open"
+                    onClick={() => setActiveSession(session)}
+                  >
+                    <span>
+                      <strong>{session.repositoryName}</strong>
+                      <small>
+                        {session.internalBranch} · {formatDateTime(session.updatedAt)}
+                      </small>
+                    </span>
+                    <StatusChip tone={sessionTone(session.status)}>
+                      {sessionLabel(session.status)}
+                    </StatusChip>
+                    <Icon name="chevron-right" size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-ghost btn-xs squash-session-discard"
+                    title="Descartar squash"
+                    aria-label={`Descartar squash de ${session.repositoryName}`}
+                    onClick={() => setDiscardTarget(session)}
+                  >
+                    <Icon name="trash" size={12} />
+                  </button>
+                </div>
               ))}
             </div>
           ) : null}
@@ -594,6 +623,18 @@ export function SquashWizardModal({ onClose, onChanged }: SquashWizardModalProps
           </div>
         </>
       )}
+
+      {discardTarget ? (
+        <ConfirmModal
+          title="Descartar squash"
+          message={`Se eliminará el worktree y la rama interna de "${discardTarget.repositoryName}". Tus ramas de requerimiento y el remoto no se tocan. Esta acción no modifica ningún ambiente.`}
+          confirmLabel="Descartar squash"
+          tone="danger"
+          busy={discarding}
+          onConfirm={() => void handleConfirmDiscard()}
+          onClose={() => setDiscardTarget(null)}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -804,11 +845,12 @@ function SessionPanel({
         </>
       ) : session.status === 'ready' ? (
         <>
-          <Callout tone="success" title="Squash listo en un solo commit">
+          <Callout tone="success" title="Squash de vista previa listo">
             {session.filesChanged} archivo(s), +{session.additions} / −
-            {session.deletions}. La rama interna
-            <code>{session.internalBranch}</code> queda lista para preparar el
-            despliegue.
+            {session.deletions}. Es una <strong>previsualización</strong> del unificado en
+            la rama interna <code>{session.internalBranch}</code>: no crea la rama del
+            ambiente ni despliega nada. Para desplegar, marca los requerimientos y usa{' '}
+            <strong>Preparar despliegue</strong>.
           </Callout>
           <div className="squash-ready">
             <div>
@@ -837,6 +879,30 @@ function SessionPanel({
               <Icon name="copy" size={13} />
               Copiar ruta
             </button>
+            {confirmAbort ? (
+              <span className="squash-abort-confirm">
+                ¿Descartar este squash?
+                <button type="button" className="btn btn-danger btn-sm" onClick={onAbort}>
+                  Sí, descartar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setConfirmAbort(false)}
+                >
+                  No
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmAbort(true)}
+              >
+                <Icon name="trash" size={13} />
+                Descartar squash
+              </button>
+            )}
             <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}>
               Nueva sesión
             </button>

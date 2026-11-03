@@ -76,6 +76,10 @@ export function RequirementsView() {
     SquashSession[] | null
   >(null);
   const [cancellingDeployment, setCancellingDeployment] = useState(false);
+  const [squashToDiscard, setSquashToDiscard] = useState<SquashSession[] | null>(
+    null,
+  );
+  const [discardingSquash, setDiscardingSquash] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -259,6 +263,33 @@ export function RequirementsView() {
     }
   }
 
+  async function confirmDiscardSquash() {
+    if (!squashToDiscard) return;
+    setDiscardingSquash(true);
+    let failed = 0;
+    for (const session of squashToDiscard) {
+      if (session.status === 'aborted') continue;
+      try {
+        await abortSquash(session.id);
+      } catch {
+        failed += 1;
+      }
+    }
+    setSquashToDiscard(null);
+    await loadSquashSessions();
+    setDiscardingSquash(false);
+    if (failed > 0) {
+      toast.warning('Squash descartado parcialmente', {
+        description: `${failed} sesión(es) no se pudieron limpiar. Revisa el detalle en Squash.`,
+      });
+    } else {
+      toast.success('Squash descartado', {
+        description:
+          'Se eliminaron los worktrees y las ramas internas. Tus ramas de requerimiento no se tocaron.',
+      });
+    }
+  }
+
   function rememberMyDeveloper(value: string) {
     setMyDeveloper(value);
     if (value) localStorage.setItem(MY_DEVELOPER_KEY, value);
@@ -354,9 +385,16 @@ export function RequirementsView() {
           >
             <Icon name="package" size={15} />
             Squash
-            {squashConflictSessions.length + deployConflictSessions.length ? (
-              <span className="req-action-badge">
-                {squashConflictSessions.length + deployConflictSessions.length}
+            {squashConflictSessions.length +
+            deployConflictSessions.length +
+            readySessions.length ? (
+              <span
+                className="req-action-badge"
+                title="Sesiones de squash activas o en conflicto"
+              >
+                {squashConflictSessions.length +
+                  deployConflictSessions.length +
+                  readySessions.length}
               </span>
             ) : null}
           </button>
@@ -455,19 +493,29 @@ export function RequirementsView() {
       ) : readySessions.length > 0 ? (
         <Callout
           tone="success"
-          title="Squash listo para el siguiente paso"
+          title="Squash de vista previa listo"
           action={
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setSquashOpen(true)}
-            >
-              Ver sesión
-            </button>
+            <div className="req-banner-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setSquashOpen(true)}
+              >
+                Ver sesión
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setSquashToDiscard(readySessions)}
+              >
+                Descartar
+              </button>
+            </div>
           }
         >
-          Hay {readySessions.length} squash listo(s). Selecciona los requerimientos y usa
-          “Preparar despliegue” para crear la rama del ambiente.
+          Hay {readySessions.length} squash listo(s). Es una vista previa del unificado: no
+          crea la rama del ambiente ni despliega nada. Para desplegar, selecciona los
+          requerimientos y usa “Preparar despliegue”.
         </Callout>
       ) : null}
 
@@ -908,6 +956,18 @@ export function RequirementsView() {
           busy={cancellingDeployment}
           onConfirm={() => void confirmCancelDeployment()}
           onClose={() => setDeploymentToCancel(null)}
+        />
+      ) : null}
+
+      {squashToDiscard ? (
+        <ConfirmModal
+          title="Descartar squash"
+          message={`Se eliminarán ${squashToDiscard.filter((session) => session.status !== 'aborted').length} sesión(es) de squash: worktrees y ramas internas. Tus ramas de requerimiento y el remoto no se tocan; ningún ambiente se modifica.`}
+          confirmLabel="Descartar squash"
+          tone="danger"
+          busy={discardingSquash}
+          onConfirm={() => void confirmDiscardSquash()}
+          onClose={() => setSquashToDiscard(null)}
         />
       ) : null}
 

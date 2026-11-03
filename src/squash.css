@@ -27,9 +27,9 @@
 .squash-session-card {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 4px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 4px 5px 4px 8px;
   margin-top: 3px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -42,7 +42,36 @@
   border-color: var(--border);
 }
 
-.squash-session-card > span {
+.squash-session-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.squash-session-discard {
+  opacity: 0;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.squash-session-card:hover .squash-session-discard,
+.squash-session-discard:focus-visible {
+  opacity: 1;
+}
+
+.squash-session-discard:hover {
+  color: var(--red);
+}
+
+.squash-session-open > span {
   flex: 1;
   min-width: 0;
   display: flex;
