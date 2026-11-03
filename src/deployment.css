@@ -172,6 +172,55 @@
   font-size: 8.5px;
 }
 
+.deployment-repo-head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.deployment-repo-head-main input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.deployment-repo-head-main > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.deployment-repo.is-excluded {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.deployment-repo.is-excluded:hover {
+  opacity: 0.75;
+}
+
+.deployment-repos-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+.deployment-repos-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .deployment-repo-reqs {
   display: flex;
   flex-direction: column;

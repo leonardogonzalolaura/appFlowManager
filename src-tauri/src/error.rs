@@ -91,6 +91,9 @@ pub enum AppError {
     PushRejected(String),
 
     #[error("{0}")]
+    NoCommits(String),
+
+    #[error("{0}")]
     DbConnectionMissing(String),
 
     #[error("{0}")]
@@ -129,6 +132,7 @@ impl AppError {
             AppError::BaseDrift(_) => "BASE_DRIFT",
             AppError::RefusingToPushEnvironmentBranch(_) => "REFUSING_ENV_PUSH",
             AppError::PushRejected(_) => "PUSH_REJECTED",
+            AppError::NoCommits(_) => "NO_COMMITS",
             AppError::DbConnectionMissing(_) => "DB_CONNECTION_MISSING",
             AppError::Secret(_) => "SECRET_ERROR",
         }

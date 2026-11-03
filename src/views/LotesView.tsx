@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { normalizeError } from '../lib/api';
 import {
+  cleanupDeployment,
   getDeploymentBatchSessions,
   listDeploymentBatches,
   retryDeploymentBatch,
@@ -12,6 +13,7 @@ import type {
   SquashSession,
 } from '../types';
 import { DeploymentWizardModal } from '../components/requirements/DeploymentWizardModal';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
 import { Spinner } from '../components/ui/Spinner';
@@ -33,6 +35,10 @@ export function LotesView() {
   const [error, setError] = useState<ApiError | null>(null);
   const [openingBatchId, setOpeningBatchId] = useState<string | null>(null);
   const [retryingBatchId, setRetryingBatchId] = useState<string | null>(null);
+  const [cleaningBatchId, setCleaningBatchId] = useState<string | null>(null);
+  const [cleanupTarget, setCleanupTarget] = useState<DeploymentBatchSummary | null>(
+    null,
+  );
   const [openBatch, setOpenBatch] = useState<OpenBatch | null>(null);
 
   const load = useCallback(async () => {
@@ -117,6 +123,37 @@ export function LotesView() {
       });
     } finally {
       setRetryingBatchId(null);
+    }
+  }
+
+  async function clean(batch: DeploymentBatchSummary) {
+    setCleaningBatchId(batch.batchId);
+    try {
+      const sessions = await getDeploymentBatchSessions(batch.batchId);
+      const result = await cleanupDeployment(sessions.map((session) => session.id));
+      setCleanupTarget(null);
+      if (result.failedBranches.length > 0) {
+        toast.warning('Algunas ramas locales no se pudieron borrar', {
+          description: result.failedBranches.join(', '),
+        });
+      } else if (result.cleanedBranches.length > 0) {
+        toast.success(
+          `${result.cleanedBranches.length} rama(s) local(es) eliminada(s)`,
+          {
+            description:
+              'Las ramas del remoto y el ambiente no se tocaron; el lote sigue completado.',
+          },
+        );
+      } else {
+        toast.info('No había ramas locales por limpiar');
+      }
+      void load();
+    } catch (caught) {
+      toast.error('No se pudieron limpiar las ramas', {
+        description: normalizeError(caught).message,
+      });
+    } finally {
+      setCleaningBatchId(null);
     }
   }
 
@@ -209,8 +246,10 @@ export function LotesView() {
               batch={batch}
               opening={openingBatchId === batch.batchId}
               retrying={retryingBatchId === batch.batchId}
+              cleaning={cleaningBatchId === batch.batchId}
               onOpen={() => void open(batch)}
               onRetry={() => void retry(batch)}
+              onCleanup={() => setCleanupTarget(batch)}
             />
           ))}
         </div>
@@ -231,6 +270,17 @@ export function LotesView() {
           }}
         />
       ) : null}
+
+      {cleanupTarget ? (
+        <ConfirmModal
+          title="Limpiar ramas locales"
+          message={`Se eliminarán las ramas hijas locales y los worktrees del lote de ${cleanupTarget.environmentLabel}. Las ramas ya empujadas a GitHub y el ambiente no se tocan; el lote sigue completado.`}
+          confirmLabel="Limpiar ramas"
+          busy={cleaningBatchId === cleanupTarget.batchId}
+          onConfirm={() => void clean(cleanupTarget)}
+          onClose={() => setCleanupTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -239,14 +289,18 @@ function BatchCard({
   batch,
   opening,
   retrying,
+  cleaning,
   onOpen,
   onRetry,
+  onCleanup,
 }: {
   batch: DeploymentBatchSummary;
   opening: boolean;
   retrying: boolean;
+  cleaning: boolean;
   onOpen: () => void;
   onRetry: () => void;
+  onCleanup: () => void;
 }) {
   const progress =
     batch.repositoryCount === 0
@@ -280,12 +334,23 @@ function BatchCard({
               {retrying ? <Spinner size="sm" /> : <Icon name="refresh" size={13} />}
               {retrying ? 'Reintentando…' : 'Reintentar'}
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={onCleanup}
+              disabled={cleaning || opening || retrying}
+              title="Elimina las ramas hijas locales y los worktrees del lote; el remoto y el ambiente no se tocan"
+            >
+              {cleaning ? <Spinner size="sm" /> : <Icon name="trash" size={13} />}
+              {cleaning ? 'Limpiando…' : 'Limpiar ramas'}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={onOpen}
-            disabled={opening || retrying}
+            disabled={opening || retrying || cleaning}
           >
             {opening ? <Spinner size="sm" /> : <Icon name="eye" size={13} />}
             {opening ? 'Abriendo…' : 'Abrir lote'}

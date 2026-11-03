@@ -4,6 +4,7 @@ import { normalizeError } from '../../lib/api';
 import { copyText, formatDateTime, shortSha, truncateMiddle } from '../../lib/format';
 import {
   applyDeployment,
+  cleanupDeployment,
   getDeploymentReport,
   loadDeploymentCommits,
   prepareDeployment,
@@ -78,6 +79,8 @@ export function DeploymentWizardModal({
   const [error, setError] = useState<ApiError | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [branchConflict, setBranchConflict] = useState<{
     session: SquashSession;
     branch: string;
@@ -89,6 +92,10 @@ export function DeploymentWizardModal({
   const [expandedRepos, setExpandedRepos] = useState<Record<string, boolean>>({});
   const [repoCommits, setRepoCommits] = useState<Record<string, BranchCommit[]>>({});
   const [loadingCommits, setLoadingCommits] = useState<Record<string, boolean>>({});
+  // Selección de repositorios: por defecto todos incluidos.
+  const [selectedRepos, setSelectedRepos] = useState<Record<string, boolean>>({});
+  const [commitMessage, setCommitMessage] = useState('');
+  const [omittedRepos, setOmittedRepos] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -131,16 +138,42 @@ export function DeploymentWizardModal({
     void loadPreview(environment);
   }, [environment, loadPreview, sessions.length]);
 
+  const selectedPreviewRepos = useMemo(
+    () =>
+      (preview?.repositories ?? []).filter(
+        (repo) => selectedRepos[repo.repositoryId] !== false,
+      ),
+    [preview, selectedRepos],
+  );
   const blocked = useMemo(
-    () => (preview?.repositories ?? []).filter((repo) => !repo.available),
-    [preview],
+    () => selectedPreviewRepos.filter((repo) => !repo.available),
+    [selectedPreviewRepos],
   );
   const deployable = useMemo(
-    () => (preview?.repositories ?? []).filter((repo) => repo.available),
-    [preview],
+    () => selectedPreviewRepos.filter((repo) => repo.available),
+    [selectedPreviewRepos],
   );
   const canPrepare =
     deployable.length > 0 && blocked.length === 0 && !loadingPreview && !preparing;
+
+  function isRepoSelected(repositoryId: string) {
+    return selectedRepos[repositoryId] !== false;
+  }
+
+  function toggleRepoSelected(repositoryId: string) {
+    setSelectedRepos((current) => ({
+      ...current,
+      [repositoryId]: !isRepoSelected(repositoryId),
+    }));
+  }
+
+  function setAllRepos(selected: boolean) {
+    const next: Record<string, boolean> = {};
+    for (const repo of preview?.repositories ?? []) {
+      next[repo.repositoryId] = selected;
+    }
+    setSelectedRepos(next);
+  }
 
   const pendingPush = sessions.filter(
     (session) =>
@@ -151,7 +184,6 @@ export function DeploymentWizardModal({
   const pendingApply = sessions.filter(
     (session) => session.phase === 'squash' && session.status === 'ready',
   );
-  const pushed = sessions.filter((session) => Boolean(session.pushedSha));
   const hasConflict = sessions.some((session) => session.status === 'conflict');
 
   const reportsKey = sessions
@@ -206,7 +238,17 @@ export function DeploymentWizardModal({
   async function prepare() {
     if (!environment || !preview) return;
 
-    const withoutSelection = preview.repositories.filter(
+    const selectedForPrepare = deployable;
+    if (selectedForPrepare.length === 0) {
+      setError({
+        code: 'NO_REPOSITORIES_SELECTED',
+        message: 'Marca al menos un repositorio para preparar el despliegue.',
+        retryable: false,
+      });
+      return;
+    }
+
+    const withoutSelection = selectedForPrepare.filter(
       (repo) =>
         (repoStrategy[repo.repositoryId] ?? 'all_commits') === 'selected_commits' &&
         (selectedCommits[repo.repositoryId]?.size ?? 0) === 0,
@@ -224,8 +266,9 @@ export function DeploymentWizardModal({
 
     setPreparing(true);
     setError(null);
+    setOmittedRepos([]);
     try {
-      const repoConfigs = preview.repositories.map((repo) => {
+      const repoConfigs = selectedForPrepare.map((repo) => {
         const strategy = repoStrategy[repo.repositoryId] ?? 'all_commits';
         return {
           repositoryId: repo.repositoryId,
@@ -237,9 +280,20 @@ export function DeploymentWizardModal({
         };
       });
 
-      const created = await prepareDeployment(requirementIds, environment, repoConfigs);
+      const created = await prepareDeployment(
+        requirementIds,
+        environment,
+        repoConfigs,
+        selectedForPrepare.map((repo) => repo.repositoryId),
+        commitMessage,
+      );
       setSessions(created);
       onChanged();
+      const createdIds = new Set(created.map((session) => session.repositoryId));
+      const omitted = selectedForPrepare
+        .filter((repo) => !createdIds.has(repo.repositoryId))
+        .map((repo) => repo.repositoryName);
+      setOmittedRepos(omitted);
       const conflicts = created.filter((session) => session.status === 'conflict');
       if (conflicts.length > 0) {
         toast.warning('Despliegue preparado con conflictos', {
@@ -247,7 +301,9 @@ export function DeploymentWizardModal({
         });
       } else {
         toast.success('Cambios unificados', {
-          description: `${created.length} repositorio(s) listos. Ahora crea la rama hija de cada uno.`,
+          description: `${created.length} repositorio(s) listos${
+            omitted.length > 0 ? `; ${omitted.length} sin commits propios se omitieron` : ''
+          }. Ahora crea la rama hija de cada uno.`,
         });
       }
     } catch (caught) {
@@ -586,6 +642,7 @@ export function DeploymentWizardModal({
     }
     setSessions([]);
     setError(null);
+    setOmittedRepos([]);
     onChanged();
     await loadPreview(environment);
   }
@@ -594,7 +651,8 @@ export function DeploymentWizardModal({
     setCancelling(true);
     let failed = 0;
     for (const session of sessions) {
-      if (session.status === 'aborted') continue;
+      // Un despliegue ya empujado no se cancela: se limpia con deployment_cleanup.
+      if (session.status === 'aborted' || session.pushedSha) continue;
       try {
         await abortSquash(session.id);
       } catch {
@@ -611,10 +669,48 @@ export function DeploymentWizardModal({
     } else {
       toast.success('Despliegue descartado', {
         description:
-          'Se limpiaron los worktrees. Las ramas locales se eliminan si no están en uso; las empujadas no se borran del remoto.',
+          'Se limpiaron las sesiones pendientes. Las ramas ya empujadas conservan su estado completado y el remoto no se toca.',
       });
     }
     onClose();
+  }
+
+  async function cleanDeployment(
+    sessionIds: string[] = sessions.map((session) => session.id),
+  ) {
+    setCleaning(true);
+    try {
+      const result = await cleanupDeployment(sessionIds);
+      const updated = new Map(result.sessions.map((session) => [session.id, session]));
+      setSessions((current) =>
+        current.map((session) => updated.get(session.id) ?? session),
+      );
+      setConfirmCleanup(false);
+      onChanged();
+      if (result.failedBranches.length > 0) {
+        toast.warning('Algunas ramas locales no se pudieron borrar', {
+          description: result.failedBranches.join(', '),
+        });
+      } else if (result.cleanedBranches.length > 0) {
+        toast.success(
+          `${result.cleanedBranches.length} rama(s) local(es) eliminada(s)`,
+          {
+            description:
+              'Las ramas del remoto y el ambiente no se tocaron; el despliegue sigue completado.',
+          },
+        );
+      } else {
+        toast.info('No había ramas locales por limpiar', {
+          description: 'Las ramas ya se habían eliminado o solo existen en el remoto.',
+        });
+      }
+    } catch (caught) {
+      toast.error('No se pudieron limpiar las ramas', {
+        description: normalizeError(caught).message,
+      });
+    } finally {
+      setCleaning(false);
+    }
   }
 
   const environmentLabel =
@@ -633,10 +729,12 @@ export function DeploymentWizardModal({
     activeEnvironments.length > 1
       ? `${activeEnvironments.length} ambientes`
       : environmentLabel;
-  const finished =
-    sessions.length > 0 &&
-    pushed.length === sessions.length &&
-    sessions.every((session) => session.pushedSha);
+  const activeSessions = sessions.filter((session) => session.status !== 'aborted');
+  const completedDeployment =
+    activeSessions.length > 0 &&
+    activeSessions.every(
+      (session) => Boolean(session.pushedSha) || session.status === 'no_changes',
+    );
 
   return (
     <Modal
@@ -668,16 +766,32 @@ export function DeploymentWizardModal({
           </>
         ) : (
           <>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setConfirmCancel(true)}
-              disabled={cancelling || Object.keys(busy).length > 0}
-            >
-              <Icon name="trash" size={14} />
-              Cancelar despliegue
-            </button>
-            
+            {completedDeployment ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setConfirmCleanup(true)}
+                disabled={cleaning || Object.keys(busy).length > 0}
+              >
+                {cleaning ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <Icon name="trash" size={14} />
+                )}
+                {cleaning ? 'Limpiando…' : 'Limpiar ramas locales'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setConfirmCancel(true)}
+                disabled={cancelling || Object.keys(busy).length > 0}
+              >
+                <Icon name="trash" size={14} />
+                Cancelar despliegue
+              </button>
+            )}
+
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cerrar
             </button>
@@ -785,6 +899,26 @@ export function DeploymentWizardModal({
             </p>
           </div>
 
+          <div className="field">
+            <label className="field-label" htmlFor="deployment-message">
+              Mensaje del commit (opcional)
+            </label>
+            <input
+              id="deployment-message"
+              className="input"
+              value={commitMessage}
+              onChange={(event) => setCommitMessage(event.target.value)}
+              placeholder="BPIM-152: fix campaña"
+              spellCheck={false}
+              autoComplete="off"
+              disabled={preparing}
+            />
+            <p className="field-hint">
+              Si lo dejas vacío se genera con la clave del requerimiento y el último
+              commit de cada repositorio, por ejemplo <code>BPIM-152: fix campaña</code>.
+            </p>
+          </div>
+
           {loadingPreview ? (
             <div className="env-manager-loading">
               <Spinner size="md" label="Analizando repositorios y ramas…" />
@@ -800,7 +934,9 @@ export function DeploymentWizardModal({
                 </div>
                 <div className="deployment-stat">
                   <span>Repositorios</span>
-                  <strong>{preview.repositories.length}</strong>
+                  <strong>
+                    {selectedPreviewRepos.length}/{preview.repositories.length}
+                  </strong>
                 </div>
                 <div
                   className={`deployment-stat ${preview.commonRepositoryCount > 0 ? 'is-common' : ''}`.trim()}
@@ -839,8 +975,35 @@ export function DeploymentWizardModal({
                     </span>
                   ))}
                   Configura la rama en la matriz de ambientes antes de preparar el
-                  despliegue.
+                  despliegue, o desmarca esos repositorios.
                 </Callout>
+              ) : null}
+
+              {preview.repositories.length > 1 ? (
+                <div className="deployment-repos-toolbar">
+                  <span>
+                    {selectedPreviewRepos.length} de {preview.repositories.length}{' '}
+                    repositorios incluidos
+                  </span>
+                  <div className="deployment-repos-toolbar-actions">
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-ghost"
+                      onClick={() => setAllRepos(true)}
+                      disabled={preparing}
+                    >
+                      Todos
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-ghost"
+                      onClick={() => setAllRepos(false)}
+                      disabled={preparing}
+                    >
+                      Ninguno
+                    </button>
+                  </div>
+                </div>
               ) : null}
 
               {preview.repositories.length === 0 ? (
@@ -852,24 +1015,39 @@ export function DeploymentWizardModal({
                   {preview.repositories.map((repo) => (
                     <div
                       key={repo.repositoryId}
-                      className={`deployment-repo ${repo.available ? '' : 'is-blocked'} ${repo.common ? 'is-common' : ''}`.trim()}
+                      className={`deployment-repo ${repo.available ? '' : 'is-blocked'} ${repo.common ? 'is-common' : ''} ${isRepoSelected(repo.repositoryId) ? '' : 'is-excluded'}`.trim()}
                     >
                       <div className="deployment-repo-head">
-                        <div>
-                          <strong>{repo.repositoryName}</strong>
-                          <small>
-                            {repo.targetBranch ? (
-                              <>
-                                base <code>{repo.targetBranch}</code>
-                                {repo.targetSha ? (
-                                  <> · {shortSha(repo.targetSha)}</>
-                                ) : null}
-                              </>
-                            ) : (
-                              'Sin rama de ambiente configurada'
-                            )}
-                          </small>
-                        </div>
+                        <label
+                          className="deployment-repo-head-main"
+                          title={
+                            isRepoSelected(repo.repositoryId)
+                              ? 'Este repositorio entrará en el despliegue'
+                              : 'Este repositorio no se desplegará en esta preparación'
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isRepoSelected(repo.repositoryId)}
+                            onChange={() => toggleRepoSelected(repo.repositoryId)}
+                            disabled={preparing}
+                          />
+                          <span>
+                            <strong>{repo.repositoryName}</strong>
+                            <small>
+                              {repo.targetBranch ? (
+                                <>
+                                  base <code>{repo.targetBranch}</code>
+                                  {repo.targetSha ? (
+                                    <> · {shortSha(repo.targetSha)}</>
+                                  ) : null}
+                                </>
+                              ) : (
+                                'Sin rama de ambiente configurada'
+                              )}
+                            </small>
+                          </span>
+                        </label>
                         {repo.common ? (
                           <StatusChip tone="warning" dot>
                             En común
@@ -890,7 +1068,7 @@ export function DeploymentWizardModal({
                         ))}
                       </div>
 
-                      {repo.available && (
+                      {repo.available && isRepoSelected(repo.repositoryId) && (
                         <div className="deployment-repo-strategy">
                           <div className="strategy-toggle">
                             <button
@@ -921,7 +1099,7 @@ export function DeploymentWizardModal({
                         </div>
                       )}
 
-                      {repo.available && repoStrategy[repo.repositoryId] === 'selected_commits' && (() => {
+                      {repo.available && isRepoSelected(repo.repositoryId) && repoStrategy[repo.repositoryId] === 'selected_commits' && (() => {
                         const commits = repoCommits[repo.repositoryId] ?? [];
                         const selected = selectedCommits[repo.repositoryId] ?? new Set<string>();
                         const expanded = Boolean(expandedRepos[repo.repositoryId]);
@@ -1087,10 +1265,21 @@ export function DeploymentWizardModal({
             rama nueva en tu equipo; el merge al ambiente lo haces tú en GitHub.
           </p>
 
-          {finished ? (
+          {omittedRepos.length > 0 ? (
+            <Callout
+              tone="warning"
+              title={`${omittedRepos.length} repositorio(s) omitido(s)`}
+            >
+              No tenían commits propios y se excluyeron de este lote:{' '}
+              {omittedRepos.join(', ')}. El resto del despliegue continúa normal.
+            </Callout>
+          ) : null}
+
+          {completedDeployment ? (
             <Callout tone="success" title="Ramas empujadas">
               Todas las ramas hijas están en el remoto. Abre un pull request hacia la
-              rama del ambiente en GitHub; FlowManager nunca hace merge a ambientes.
+              rama del ambiente en GitHub; FlowManager nunca hace merge a ambientes. Si
+              ya no necesitas las ramas locales, usa <strong>Limpiar ramas locales</strong>.
             </Callout>
           ) : null}
 
@@ -1108,6 +1297,7 @@ export function DeploymentWizardModal({
               onContinue={() => void handleContinue(session)}
               onRefresh={() => void handleRefresh(session)}
               onAbort={() => void handleAbort(session)}
+              onCleanup={() => void cleanDeployment([session.id])}
               onReprepare={() => void restartPreparation()}
               onOpenEditor={(file) => void handleOpenEditor(session, file)}
               onOpenTaruGit={() => void handleOpenTaruGit(session)}
@@ -1141,12 +1331,31 @@ export function DeploymentWizardModal({
           {confirmCancel ? (
             <ConfirmModal
               title="Cancelar despliegue"
-              message={`Se limpiarán ${sessions.filter((session) => session.status !== 'aborted').length} sesión(es): worktrees y ramas locales. Las ramas que ya se empujaron no se borran del remoto. El ambiente no se modifica.`}
-              confirmLabel="Descartar despliegue"
+              message={`Se limpiarán ${sessions.filter((session) => session.status !== 'aborted' && !session.pushedSha).length} sesión(es) pendientes: worktrees y ramas locales. Las ramas que ya se empujaron conservan su estado completado y no se borran del remoto. El ambiente no se modifica.`}
+              confirmLabel="Descartar pendientes"
               tone="danger"
               busy={cancelling}
               onConfirm={() => void cancelDeployment()}
               onClose={() => setConfirmCancel(false)}
+            />
+          ) : null}
+
+          {confirmCleanup ? (
+            <ConfirmModal
+              title="Limpiar ramas locales"
+              message={`Se eliminarán las ramas hijas locales y los worktrees de este despliegue: ${
+                Array.from(
+                  new Set(
+                    sessions
+                      .map((session) => session.deployBranch)
+                      .filter((branch): branch is string => Boolean(branch)),
+                  ),
+                ).join(', ') || 'sin ramas pendientes'
+              }. Las ramas ya empujadas a GitHub y el ambiente no se tocan; el despliegue sigue completado.`}
+              confirmLabel="Limpiar ramas"
+              busy={cleaning}
+              onConfirm={() => void cleanDeployment()}
+              onClose={() => setConfirmCleanup(false)}
             />
           ) : null}
         </div>
@@ -1167,6 +1376,7 @@ interface DeploymentSessionCardProps {
   onContinue: () => void;
   onRefresh: () => void;
   onAbort: () => void;
+  onCleanup: () => void;
   onReprepare: () => void;
   onOpenEditor: (file?: string) => void;
   onOpenTaruGit: () => void;
@@ -1186,6 +1396,7 @@ function DeploymentSessionCard({
   onContinue,
   onRefresh,
   onAbort,
+  onCleanup,
   onReprepare,
   onOpenEditor,
   onOpenTaruGit,
@@ -1716,11 +1927,15 @@ function DeploymentSessionCard({
         </div>
       ) : confirmAbort && pushed ? (
         <div className="squash-abort-confirm">
-          La rama remota ya existe y no se borrará. Solo se limpiará el worktree local.
+          La rama remota ya existe y no se borrará. Se limpiará el worktree local y la
+          rama local; el despliegue sigue completado.
           <button
             type="button"
             className="btn btn-danger btn-sm"
-            onClick={onAbort}
+            onClick={() => {
+              setConfirmAbort(false);
+              onCleanup();
+            }}
             disabled={busy}
           >
             Sí, limpiar local

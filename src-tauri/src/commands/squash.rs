@@ -119,6 +119,11 @@ pub struct DeploymentPreviewInput {
     pub environment: String,
     pub strategy: Option<String>,
     pub selected_commits: Option<Vec<String>>,
+    /// Repositorios que participan del despliegue. `None` = todos.
+    pub repository_ids: Option<Vec<String>>,
+    /// Mensaje manual para el commit de cada repositorio. Si falta, se genera
+    /// con la clave del requerimiento y el último commit.
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +140,10 @@ pub struct DeploymentPrepareInput {
     pub requirement_ids: Vec<String>,
     pub environment: String,
     pub repo_configs: Option<Vec<RepoCommitsConfig>>, // Nueva: estrategia por repo
+    /// Repositorios marcados en el wizard. `None` = todos.
+    pub repository_ids: Option<Vec<String>>,
+    /// Mensaje manual del commit; vacío = automático por repositorio.
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -460,6 +469,8 @@ async fn prepare_squash(
     }
 
     let mut analyses = Vec::new();
+    let mut active_mappings: Vec<&CandidateRow> = Vec::new();
+    let mut skipped_keys: Vec<String> = Vec::new();
     for mapping in &mappings {
         let analysis = branch_ops::analyze(
             Path::new(&repo.local_path),
@@ -468,6 +479,11 @@ async fn prepare_squash(
             &mapping.base_branch,
             &mapping.external_key,
         )?;
+        // Una rama sin commits propios no bloquea al resto: se omite.
+        if analysis.status == "no_commits" {
+            skipped_keys.push(mapping.external_key.clone());
+            continue;
+        }
         if analysis.status != "ok" {
             return Err(AppError::Validation(format!(
                 "{}: {}",
@@ -475,10 +491,22 @@ async fn prepare_squash(
             ))
             .into());
         }
+        active_mappings.push(mapping);
         analyses.push(analysis);
     }
+    if active_mappings.is_empty() {
+        let base = mappings
+            .first()
+            .map(|mapping| mapping.base_branch.clone())
+            .unwrap_or_else(|| repo.base_branch.clone());
+        return Err(AppError::NoCommits(format!(
+            "{}: sin commits propios respecto a {base}.",
+            skipped_keys.join(", ")
+        ))
+        .into());
+    }
 
-    let selected_requirements: Vec<SquashRequirementRef> = mappings
+    let selected_requirements: Vec<SquashRequirementRef> = active_mappings
         .iter()
         .map(|mapping| SquashRequirementRef {
             id: mapping.requirement_id.clone(),
@@ -489,7 +517,7 @@ async fn prepare_squash(
 
     let mut selected_commits: Vec<BranchCommit> = Vec::new();
     let actions = if strategy == "all_commits" {
-        mappings
+        active_mappings
             .iter()
             .enumerate()
             .map(|(index, mapping)| SquashAction {
@@ -566,7 +594,7 @@ async fn prepare_squash(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| default_squash_message(&mappings));
+        .unwrap_or_else(|| default_squash_message(&active_mappings, &analyses));
 
     let session_id = Uuid::now_v7().to_string();
     let compact = session_id.replace('-', "");
@@ -694,6 +722,8 @@ pub async fn deployment_prepare(
         environment: input.environment.clone(),
         strategy: None,
         selected_commits: None,
+        repository_ids: input.repository_ids.clone(),
+        message: input.message.clone(),
     };
     
     prepare_deployment(pool, &state.paths.worktrees_dir, preview_input, input.repo_configs).await
@@ -824,6 +854,8 @@ pub async fn deployment_batch_retry(
             environment,
             strategy: None,
             selected_commits: None,
+            repository_ids: None,
+            message: None,
         },
         None,
     )
@@ -838,10 +870,15 @@ async fn prepare_deployment(
 ) -> Result<Vec<SquashSession>, ApiError> {
     environment_label(pool, &input.environment).await?;
     let rows = load_deployment_rows(pool, &input.requirement_ids, &input.environment).await?;
-    let repositories = group_deployment_rows(rows);
+    let mut repositories = group_deployment_rows(rows);
+    if let Some(ids) = input.repository_ids.as_deref() {
+        if !ids.is_empty() {
+            repositories.retain(|repo| ids.iter().any(|id| id == &repo.repository_id));
+        }
+    }
     if repositories.is_empty() {
         return Err(AppError::Validation(
-            "Ninguno de los requerimientos está mapeado a repositorios.".into(),
+            "Selecciona al menos un repositorio para el despliegue.".into(),
         )
         .into());
     }
@@ -860,6 +897,7 @@ async fn prepare_deployment(
     }
 
     let mut sessions = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     let batch_id = Uuid::now_v7().to_string();
     let strategy = input.strategy.as_deref().unwrap_or("all_commits");
     let configs_by_repo = repo_configs
@@ -893,7 +931,7 @@ async fn prepare_deployment(
                 requirement_ids,
                 strategy: repo_strategy.to_string(),
                 commit_shas: repo_commits,
-                message: None,
+                message: input.message.clone(),
             },
             Some(input.environment.clone()),
             Some(target_branch),
@@ -902,6 +940,11 @@ async fn prepare_deployment(
         .await;
         match session {
             Ok(session) => sessions.push(session),
+            // Un repositorio sin commits propios no debe bloquear el resto del
+            // lote: se omite y se informa cuáles quedaron fuera.
+            Err(error) if error.code == "NO_COMMITS" => {
+                skipped.push(repository.repository_name.clone());
+            }
             Err(error) => {
                 for created in &sessions {
                     cleanup_session(pool, created).await;
@@ -909,6 +952,17 @@ async fn prepare_deployment(
                 return Err(error);
             }
         }
+    }
+    if sessions.is_empty() {
+        let detail = if skipped.is_empty() {
+            "No hay repositorios con cambios para desplegar.".to_string()
+        } else {
+            format!(
+                "Ningún repositorio seleccionado tiene commits propios para desplegar: {}.",
+                skipped.join(", ")
+            )
+        };
+        return Err(AppError::NoCommits(detail).into());
     }
     Ok(sessions)
 }
@@ -1222,7 +1276,9 @@ async fn apply_deployment_with(
             && squash_ops::has_meaningful_staged_changes(worktree)?;
         
         if !has_changes {
-            // No hay cambios netos, aunque haya archivos marcados como unmerged
+            // No hay cambios netos, aunque haya archivos marcados como unmerged.
+            // La rama hija recién creada no debe quedar como residuo local.
+            let _ = git_cli::delete_local_branch(Path::new(&repo.local_path), &deploy_branch);
             sqlx::query(
                 "UPDATE squash_sessions
                  SET phase = 'deploy', status = 'no_changes', environment = ?1,
@@ -1472,6 +1528,99 @@ async fn push_deployment(
     mark_pushed(pool, &session.id, &push_sha).await?;
     release_worktree_if_attached(&session, &push_sha);
     Ok(load_session(pool, &session.id).await?.into_dto())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentCleanupInput {
+    pub session_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentCleanupResult {
+    pub sessions: Vec<SquashSession>,
+    /// Ramas hijas locales eliminadas.
+    pub cleaned_branches: Vec<String>,
+    /// Ramas que no se pudieron borrar (por ejemplo, abiertas en otra herramienta).
+    pub failed_branches: Vec<String>,
+}
+
+/// Limpia los artefactos locales de un despliegue ya empujado: worktrees y
+/// ramas hijas locales. No toca el remoto, el ambiente ni el estado de la
+/// sesión; un despliegue empujado sigue completado, no cancelado.
+#[tauri::command]
+pub async fn deployment_cleanup(
+    state: State<'_, AppState>,
+    input: DeploymentCleanupInput,
+) -> Result<DeploymentCleanupResult, ApiError> {
+    let pool = state.pool()?;
+    cleanup_deployment_sessions(pool, &input.session_ids).await
+}
+
+async fn cleanup_deployment_sessions(
+    pool: &SqlitePool,
+    session_ids: &[String],
+) -> Result<DeploymentCleanupResult, ApiError> {
+    let mut sessions = Vec::new();
+    let mut cleaned_branches = Vec::new();
+    let mut failed_branches = Vec::new();
+
+    for session_id in session_ids {
+        let session = load_session(pool, session_id).await?;
+
+        // Solo se limpian despliegues ya empujados (o sin cambios). Una sesión
+        // pendiente se descarta con squash_abort, que sí cambia su estado.
+        if session.pushed_sha.is_none() && session.status != "no_changes" {
+            sessions.push(session.into_dto());
+            continue;
+        }
+
+        let repo = load_repo(pool, &session.repository_id).await?;
+        let repo_path = Path::new(&repo.local_path);
+        let worktree = Path::new(&session.worktree_path);
+
+        if worktree.exists() {
+            let reset_sha = session
+                .target_base_sha
+                .as_deref()
+                .unwrap_or(&session.base_sha);
+            let _ = squash_ops::hard_reset_clean(worktree, reset_sha);
+            let _ = squash_ops::remove_worktree(repo_path, worktree, &session.internal_branch);
+        } else if squash_ops::rev_parse(
+            repo_path,
+            &format!("refs/heads/{}", session.internal_branch),
+        )?
+        .is_some()
+        {
+            let _ = git_cli::delete_local_branch(repo_path, &session.internal_branch);
+        }
+
+        if let Some(branch) = session.deploy_branch.as_deref() {
+            let branch_ref = format!("refs/heads/{branch}");
+            if squash_ops::rev_parse(repo_path, &branch_ref)?.is_some() {
+                match git_cli::delete_local_branch(repo_path, branch) {
+                    Ok(run) if run.success => cleaned_branches.push(branch.to_string()),
+                    Ok(run) => failed_branches
+                        .push(format!("{branch}: {}", run.stderr.trim().to_string())),
+                    Err(error) => failed_branches.push(format!("{branch}: {error}")),
+                }
+            }
+        }
+
+        sqlx::query("UPDATE squash_sessions SET updated_at = ?1 WHERE id = ?2")
+            .bind(now())
+            .bind(&session.id)
+            .execute(pool)
+            .await?;
+        sessions.push(load_session(pool, session_id).await?.into_dto());
+    }
+
+    Ok(DeploymentCleanupResult {
+        sessions,
+        cleaned_branches,
+        failed_branches,
+    })
 }
 
 #[tauri::command]
@@ -1984,6 +2133,11 @@ async fn continue_squash(
             let _ = squash_ops::cherry_pick_quit(worktree);
             if !was_detached {
                 let _ = git_cli::checkout_detached(worktree, &head);
+            }
+            // La resolución no dejó cambios netos: la rama hija local quedaría
+            // vacía y bloquearía el próximo intento. Se elimina.
+            if let Ok(repo) = load_repo(pool, &session.repository_id).await {
+                let _ = git_cli::delete_local_branch(Path::new(&repo.local_path), &deploy_branch);
             }
             sqlx::query(
                 "UPDATE squash_sessions SET status = 'no_changes', deploy_sha = ?1,
@@ -2530,21 +2684,40 @@ fn parse_plan(json: &str) -> SquashPlan {
     plan
 }
 
-fn default_squash_message(mappings: &[CandidateRow]) -> String {
+fn default_squash_message(
+    mappings: &[&CandidateRow],
+    analyses: &[branch_ops::BranchAnalysis],
+) -> String {
+    let latest_summary = |index: usize| -> Option<String> {
+        let commits = analyses.get(index)?.commits.as_slice();
+        commits
+            .iter()
+            .max_by(|left, right| left.committed_at.cmp(&right.committed_at))
+            .map(|commit| commit.summary.clone())
+    };
+
+    let first = mappings[0];
+    let first_summary = latest_summary(0).unwrap_or_else(|| first.title.clone());
     if mappings.len() == 1 {
-        format!("{}: {}", mappings[0].external_key, mappings[0].title)
+        format!("{}: {}", first.external_key, first_summary)
     } else {
-        let keys = mappings
+        // Varios requerimientos: no listar todos los nombres. Clave principal
+        // + resumen del último commit de cada rama.
+        let summaries = mappings
             .iter()
-            .map(|mapping| mapping.external_key.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let titles = mappings
-            .iter()
-            .map(|mapping| mapping.title.as_str())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        format!("{keys}: {titles}\n\nRequirements: {keys}")
+            .enumerate()
+            .filter_map(|(index, _)| latest_summary(index))
+            .collect::<Vec<_>>();
+        if summaries.is_empty() {
+            format!("{}(+{}): {}", first.external_key, mappings.len() - 1, first.title)
+        } else {
+            format!(
+                "{}(+{}): {}",
+                first.external_key,
+                mappings.len() - 1,
+                summaries.join(" | ")
+            )
+        }
     }
 }
 
@@ -2947,6 +3120,101 @@ mod tests {
         pool.close().await;
     }
 
+    #[test]
+    fn default_message_uses_latest_commit_summary() {
+        let mapping = CandidateRow {
+            requirement_id: "req-1".into(),
+            external_key: "BPIM-152".into(),
+            title: "Título del requerimiento".into(),
+            requirement_type: None,
+            branch_name: "feature/BPIM-152".into(),
+            branch_status: "existing".into(),
+            base_branch: "master".into(),
+        };
+        let analysis = branch_ops::BranchAnalysis {
+            branch_name: "feature/BPIM-152".into(),
+            base_branch: "master".into(),
+            base_ref: "refs/heads/master".into(),
+            status: "ok".into(),
+            base_sha: None,
+            branch_sha: None,
+            merge_base_sha: None,
+            ahead: 2,
+            behind: 0,
+            commits: vec![
+                BranchCommit {
+                    sha: "a".into(),
+                    summary: "fix viejo".into(),
+                    author: None,
+                    committed_at: "2026-01-01T00:00:00Z".into(),
+                    is_foreign: false,
+                    source_branch: None,
+                    requirement_key: None,
+                },
+                BranchCommit {
+                    sha: "b".into(),
+                    summary: "fix campaña".into(),
+                    author: None,
+                    committed_at: "2026-02-01T00:00:00Z".into(),
+                    is_foreign: false,
+                    source_branch: None,
+                    requirement_key: None,
+                },
+            ],
+            files: Vec::new(),
+            total_additions: 0,
+            total_deletions: 0,
+            foreign_commits: 0,
+            message: String::new(),
+        };
+
+        assert_eq!(
+            default_squash_message(&[&mapping], std::slice::from_ref(&analysis)),
+            "BPIM-152: fix campaña"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_keeps_pushed_session_completed_and_removes_local_branch() {
+        let (dir, pool, repo_path) = setup_deployment(true).await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        let applied = apply_deployment(&pool, &prepared.id).await.expect("apply");
+        let pushed = push_deployment(&pool, &applied.id).await.expect("push");
+
+        let result = cleanup_deployment_sessions(&pool, std::slice::from_ref(&pushed.id))
+            .await
+            .expect("cleanup");
+        assert_eq!(result.cleaned_branches, vec!["BPIM-1-dev".to_string()]);
+        assert!(result.failed_branches.is_empty());
+
+        let updated = &result.sessions[0];
+        assert_eq!(updated.status, "ready");
+        assert_eq!(updated.phase, "deploy");
+        assert_eq!(updated.pushed_sha, pushed.pushed_sha);
+        assert!(!Path::new(&updated.worktree_path).exists());
+        assert!(
+            squash_ops::rev_parse(Path::new(&repo_path), "refs/heads/BPIM-1-dev")
+                .expect("rev parse")
+                .is_none()
+        );
+
+        // La rama remota sigue existiendo para el PR.
+        let bare = Repository::open(dir.path().join("remote.git")).expect("bare");
+        assert!(bare.find_reference("refs/heads/BPIM-1-dev").is_ok());
+
+        pool.close().await;
+    }
+
     #[tokio::test]
     async fn deployment_push_includes_commits_added_to_child_branch() {
         let (dir, pool, repo_path) = setup_deployment(true).await;
@@ -3205,13 +3473,17 @@ mod tests {
         assert_eq!(continued.deploy_additions, 0);
         assert_eq!(continued.deploy_deletions, 0);
 
-        let local = squash_ops::rev_parse(
-            Path::new(&repo_path),
-            "refs/heads/BPIM-1-dev",
-        )
-        .expect("local ref")
-        .expect("local branch");
-        assert_eq!(Some(local), continued.target_base_sha);
+        // La rama hija vacía no debe quedar como residuo local: se elimina y
+        // así no bloquea el próximo intento de despliegue.
+        assert!(
+            squash_ops::rev_parse(
+                Path::new(&repo_path),
+                "refs/heads/BPIM-1-dev",
+            )
+            .expect("local ref")
+            .is_none()
+        );
+        assert_eq!(continued.deploy_sha, continued.target_base_sha);
 
         cleanup_session(&pool, &continued).await;
         pool.close().await;

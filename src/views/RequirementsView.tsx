@@ -161,8 +161,20 @@ export function RequirementsView() {
   const deployConflictSessions = deploymentSessions.filter(
     (session) => session.status === 'conflict',
   );
-  const deployReadySessions = deploymentSessions.filter(
+  // Un despliegue empujado sigue con status 'ready', pero ya no está pendiente.
+  const deployPendingSessions = deploymentSessions.filter(
+    (session) =>
+      !session.pushedSha &&
+      session.status !== 'no_changes' &&
+      session.status !== 'conflict',
+  );
+  const deployReadySessions = deployPendingSessions.filter(
     (session) => session.status === 'ready',
+  );
+  // Para reanudar/descartar: pendientes y conflictos, nunca lo ya empujado.
+  const deployResumeSessions = deploymentSessions.filter(
+    (session) =>
+      session.status === 'conflict' || (session.status === 'ready' && !session.pushedSha),
   );
   const squashConflictSessions = squashSessions.filter(
     (session) => session.status === 'conflict' && !session.environment,
@@ -207,7 +219,7 @@ export function RequirementsView() {
   }
 
   function resumeDeployment() {
-    const active = deploymentSessions;
+    const active = deployResumeSessions;
     const ids = Array.from(
       new Set(
         active.flatMap((session) =>
@@ -225,7 +237,7 @@ export function RequirementsView() {
     setCancellingDeployment(true);
     let failed = 0;
     for (const session of deploymentToCancel) {
-      if (session.status === 'aborted') continue;
+      if (session.status === 'aborted' || session.pushedSha) continue;
       try {
         await abortSquash(session.id);
       } catch {
@@ -386,7 +398,7 @@ export function RequirementsView() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => setDeploymentToCancel(deploymentSessions)}
+                onClick={() => setDeploymentToCancel(deployResumeSessions)}
               >
                 Descartar
               </button>
@@ -429,7 +441,7 @@ export function RequirementsView() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => setDeploymentToCancel(deploymentSessions)}
+                onClick={() => setDeploymentToCancel(deployResumeSessions)}
               >
                 Descartar
               </button>

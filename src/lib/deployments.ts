@@ -3,6 +3,7 @@ import { isTauri } from './api';
 import type {
   BranchCommit,
   DeploymentBatchSummary,
+  DeploymentCleanupResult,
   DeploymentPreview,
   DeploymentReport,
   SquashSession,
@@ -32,6 +33,8 @@ export async function prepareDeployment(
   requirementIds: string[],
   environment: string,
   repoConfigs?: Array<{ repositoryId: string; strategy: string; selectedCommits: string[] }>,
+  repositoryIds?: string[],
+  message?: string,
 ): Promise<SquashSession[]> {
   requireDesktop();
   return invoke<SquashSession[]>('deployment_prepare', {
@@ -39,6 +42,8 @@ export async function prepareDeployment(
       requirementIds,
       environment,
       repoConfigs: repoConfigs || [],
+      repositoryIds: repositoryIds ?? null,
+      message: message?.trim() ? message.trim() : null,
     },
   });
 }
@@ -74,6 +79,15 @@ export async function getDeploymentReport(
 export async function pushDeployment(sessionId: string): Promise<SquashSession> {
   requireDesktop();
   return invoke<SquashSession>('deployment_push', { sessionId });
+}
+
+export async function cleanupDeployment(
+  sessionIds: string[],
+): Promise<DeploymentCleanupResult> {
+  requireDesktop();
+  return invoke<DeploymentCleanupResult>('deployment_cleanup', {
+    input: { sessionIds },
+  });
 }
 
 export async function listDeploymentBatches(): Promise<DeploymentBatchSummary[]> {

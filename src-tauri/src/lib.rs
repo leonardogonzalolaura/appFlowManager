@@ -102,6 +102,7 @@ pub fn run() {
             commands::squash::deployment_apply,
             commands::squash::deployment_report,
             commands::squash::deployment_push,
+            commands::squash::deployment_cleanup,
             commands::squash::deployment_batches_list,
             commands::squash::deployment_batch_sessions,
             commands::squash::deployment_batch_retry,

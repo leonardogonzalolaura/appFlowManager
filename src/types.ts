@@ -461,6 +461,12 @@ export interface AppSettings {
   manualKeyPrefix: string;
 }
 
+export interface DeploymentCleanupResult {
+  sessions: SquashSession[];
+  cleanedBranches: string[];
+  failedBranches: string[];
+}
+
 export interface DeploymentBatchSummary {
   batchId: string;
   environment: string | null;
