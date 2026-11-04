@@ -1,7 +1,9 @@
 use crate::error::AppError;
 use chrono::Utc;
+use sha2::{Digest, Sha384};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -27,9 +29,72 @@ pub async fn connect(db_path: &Path, backups_dir: &Path) -> Result<SqlitePool, A
         .connect_with(options)
         .await?;
 
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    let migrator = sqlx::migrate!("./migrations");
+    repair_eol_checksum_mismatches(&pool, &migrator).await?;
+    migrator.run(&pool).await?;
     tracing::info!(path = %db_path.display(), "Base de datos lista");
     Ok(pool)
+}
+
+/// SQLx guarda el checksum SHA-384 del archivo de migración. Si la misma
+/// migración se compiló con CRLF en Windows y con LF en otro entorno, la base
+/// existente falla con `VersionMismatch` aunque el esquema sea idéntico.
+///
+/// Reparamos únicamente ese caso: si el checksum guardado coincide con la
+/// variante LF o CRLF del SQL embebido, es una diferencia de fin de línea y
+/// actualizamos el checksum al actual. Cualquier otra diferencia se deja
+/// fallar como migración modificada de verdad.
+async fn repair_eol_checksum_mismatches(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<(), AppError> {
+    let table: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if table.is_none() {
+        return Ok(());
+    }
+
+    let rows: Vec<(i64, Vec<u8>)> =
+        sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations WHERE success = 1")
+            .fetch_all(pool)
+            .await?;
+    let applied: HashMap<i64, Vec<u8>> = rows.into_iter().collect();
+
+    for migration in migrator.iter() {
+        let Some(stored) = applied.get(&migration.version) else {
+            continue;
+        };
+        if stored.as_slice() == migration.checksum.as_ref() {
+            continue;
+        }
+
+        let lf = migration.sql.replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        let lf_checksum = Sha384::digest(lf.as_bytes());
+        let crlf_checksum = Sha384::digest(crlf.as_bytes());
+        let eol_only = stored.as_slice() == lf_checksum.as_slice()
+            || stored.as_slice() == crlf_checksum.as_slice();
+        if !eol_only {
+            return Err(AppError::Migration(
+                sqlx::migrate::MigrateError::VersionMismatch(migration.version),
+            ));
+        }
+
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+            .bind(migration.checksum.to_vec())
+            .bind(migration.version)
+            .execute(pool)
+            .await?;
+        tracing::warn!(
+            version = migration.version,
+            "Se reparó el checksum de la migración por diferencia de fin de línea"
+        );
+    }
+
+    Ok(())
 }
 
 /// Copia la BD antes de migrar. Conserva las 5 copias más recientes.
@@ -118,6 +183,53 @@ mod tests {
 
         let pool = connect(&db_path, &backups).await.expect("second connect");
         assert_eq!(schema_version(&pool).await.expect("schema"), 10);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn repairs_line_ending_checksum_mismatch() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("flowmanager.db");
+        let backups = dir.path().join("backups");
+
+        let pool = connect(&db_path, &backups).await.expect("first connect");
+        let migrator = sqlx::migrate!("./migrations");
+        let migration = migrator
+            .iter()
+            .find(|migration| migration.version == 1)
+            .expect("migration 1");
+        let current: &[u8] = migration.checksum.as_ref();
+        let lf = migration.sql.replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        let lf_checksum = Sha384::digest(lf.as_bytes());
+        let crlf_checksum = Sha384::digest(crlf.as_bytes());
+        let alternate = if lf_checksum.as_slice() == current {
+            crlf_checksum
+        } else {
+            lf_checksum
+        };
+        if alternate.as_slice() == current {
+            pool.close().await;
+            return;
+        }
+
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = 1")
+            .bind(alternate.to_vec())
+            .execute(&pool)
+            .await
+            .expect("alter checksum");
+        pool.close().await;
+
+        let pool = connect(&db_path, &backups)
+            .await
+            .expect("connect repairs the EOL checksum");
+        let checksum: Vec<u8> =
+            sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("checksum");
+        assert_eq!(checksum.as_slice(), current);
+
         pool.close().await;
     }
 

@@ -1,0 +1,4 @@
+# sqlx embebe el checksum del archivo de migración. Debe ser LF en todos los
+# entornos (local y GitHub Actions) para que el instalador y la base local
+# generen exactamente el mismo hash.
+src-tauri/migrations/*.sql text eol=lf
