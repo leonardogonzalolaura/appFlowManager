@@ -459,10 +459,20 @@ export interface RequirementPresence {
 export interface AppSettings {
   baseBranch: string;
   manualKeyPrefix: string;
+  gitUserName: string;
+  gitUserEmail: string;
+  gitConfigUserName: string | null;
+  gitConfigUserEmail: string | null;
 }
 
 export interface DeploymentCleanupResult {
   sessions: SquashSession[];
+  cleanedBranches: string[];
+  failedBranches: string[];
+}
+
+export interface DeploymentDeleteResult {
+  deletedSessions: number;
   cleanedBranches: string[];
   failedBranches: string[];
 }

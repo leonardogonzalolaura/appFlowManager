@@ -4,6 +4,7 @@ import type {
   BranchCommit,
   DeploymentBatchSummary,
   DeploymentCleanupResult,
+  DeploymentDeleteResult,
   DeploymentPreview,
   DeploymentReport,
   SquashSession,
@@ -100,6 +101,13 @@ export async function getDeploymentBatchSessions(
 ): Promise<SquashSession[]> {
   requireDesktop();
   return invoke<SquashSession[]>('deployment_batch_sessions', { batchId });
+}
+
+export async function deleteDeploymentBatch(
+  batchId: string,
+): Promise<DeploymentDeleteResult> {
+  requireDesktop();
+  return invoke<DeploymentDeleteResult>('deployment_batch_delete', { batchId });
 }
 
 export async function retryDeploymentBatch(

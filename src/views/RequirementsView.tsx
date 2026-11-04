@@ -188,14 +188,16 @@ export function RequirementsView() {
       session.status === 'ready' && !session.environment && session.phase === 'squash',
   );
 
-  const pageSelectable = (data?.items ?? []).filter((item) => !item.archivedAt);
+  const pageSelectable = (data?.items ?? []).filter(
+    (item) => !item.archivedAt && item.repoCount > 0,
+  );
   const allPageSelected =
     pageSelectable.length > 0 &&
     pageSelectable.every((item) => selected.has(item.id));
   const somePageSelected = pageSelectable.some((item) => selected.has(item.id));
 
   function toggleSelected(item: RequirementListItem) {
-    if (item.archivedAt) return;
+    if (item.archivedAt || item.repoCount === 0) return;
     setSelected((current) => {
       const next = new Map(current);
       if (next.has(item.id)) next.delete(item.id);
@@ -220,6 +222,18 @@ export function RequirementsView() {
     setDeployRequirementIds(requirementIds);
     setDeployInitialSessions([]);
     setDeployOpen(true);
+  }
+
+  function openDeploymentFor(item: RequirementListItem) {
+    if (item.archivedAt) return;
+    if (item.repoCount === 0) {
+      toast.info('Este requerimiento no tiene repositorios', {
+        description:
+          'Asigna al menos un repositorio antes de preparar el despliegue.',
+      });
+      return;
+    }
+    openDeployment([item.id]);
   }
 
   function resumeDeployment() {
@@ -815,6 +829,7 @@ export function RequirementsView() {
                       item={item}
                       selected={selected.has(item.id)}
                       onToggle={() => toggleSelected(item)}
+                      onDeploy={() => openDeploymentFor(item)}
                       onOpen={() => setDetailId(item.id)}
                       onArchive={() =>
                         setArchiveTarget({
@@ -886,6 +901,9 @@ export function RequirementsView() {
 
       {deployOpen ? (
         <DeploymentWizardModal
+          key={`${deployRequirementIds.join('|')}::${deployInitialSessions
+            .map((session) => session.id)
+            .join('|')}`}
           requirementIds={deployRequirementIds}
           initialSessions={deployInitialSessions}
           onClose={() => {
@@ -990,15 +1008,18 @@ function RequirementRow({
   item,
   selected,
   onToggle,
+  onDeploy,
   onOpen,
   onArchive,
 }: {
   item: RequirementListItem;
   selected: boolean;
   onToggle: () => void;
+  onDeploy: () => void;
   onOpen: () => void;
   onArchive: () => void;
 }) {
+  const deployable = !item.archivedAt && item.repoCount > 0;
   return (
     <tr className={`${item.archivedAt ? 'is-archived' : ''} ${selected ? 'is-selected' : ''}`.trim()}>
       <td className="req-select-col">
@@ -1006,7 +1027,12 @@ function RequirementRow({
           type="checkbox"
           checked={selected}
           onChange={onToggle}
-          disabled={Boolean(item.archivedAt)}
+          disabled={!deployable}
+          title={
+            deployable
+              ? undefined
+              : 'Asigna al menos un repositorio para poder desplegar'
+          }
           aria-label={`Seleccionar ${item.externalKey}`}
         />
       </td>
@@ -1070,6 +1096,20 @@ function RequirementRow({
       </td>
       <td>
         <div className="req-row-actions">
+          <button
+            type="button"
+            className="btn btn-icon btn-ghost btn-xs req-deploy"
+            aria-label={`Desplegar ${item.externalKey}`}
+            title={
+              deployable
+                ? 'Preparar despliegue para este requerimiento'
+                : 'Asigna al menos un repositorio para desplegar'
+            }
+            onClick={onDeploy}
+            disabled={!deployable}
+          >
+            <Icon name="rocket" size={13} />
+          </button>
           <button
             type="button"
             className="btn btn-icon btn-ghost btn-xs"

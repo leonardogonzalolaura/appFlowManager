@@ -331,7 +331,7 @@ export function RequirementDetailModal({
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    title="Recalcular el estado de cada ambiente"
+                    title="Actualiza origin/* desde el remoto y recalcula el estado de cada ambiente"
                     onClick={() => void loadPresence(true)}
                     disabled={presenceLoading}
                   >
@@ -352,6 +352,13 @@ export function RequirementDetailModal({
                   </button>
                 </div>
               </div>
+              <p className="req-presence-legend">
+                <Icon name="info" size={12} />
+                La comparación se hace contra las ramas remotas{' '}
+                <code>origin/*</code>, no contra tu copia local. Al pulsar{' '}
+                <strong>Ambientes</strong> se actualizan las referencias remotas y se
+                recalcula el estado.
+              </p>
               {presenceError ? (
                 <p className="req-presence-note">
                   <Icon name="alert" size={12} /> {presenceError}

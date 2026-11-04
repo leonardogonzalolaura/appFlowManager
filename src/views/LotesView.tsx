@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { normalizeError } from '../lib/api';
 import {
   cleanupDeployment,
+  deleteDeploymentBatch,
   getDeploymentBatchSessions,
   listDeploymentBatches,
   retryDeploymentBatch,
@@ -39,6 +40,11 @@ export function LotesView() {
   const [cleanupTarget, setCleanupTarget] = useState<DeploymentBatchSummary | null>(
     null,
   );
+  const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeploymentBatchSummary | null>(
+    null,
+  );
+  const [query, setQuery] = useState('');
   const [openBatch, setOpenBatch] = useState<OpenBatch | null>(null);
 
   const load = useCallback(async () => {
@@ -70,15 +76,30 @@ export function LotesView() {
     (batch) => batch.status === 'completed',
   ).length;
 
-  const visible = useMemo(
-    () =>
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = useMemo(() => {
+    const base =
       filter === 'active'
         ? batches.filter(
             (batch) => !['completed', 'cancelled'].includes(batch.status),
           )
-        : batches,
-    [batches, filter],
-  );
+        : batches;
+    if (!normalizedQuery) return base;
+    // Con búsqueda activa se consultan todos los lotes, no solo la pestaña.
+    return batches.filter(
+      (batch) =>
+        batch.requirements.some(
+          (requirement) =>
+            requirement.externalKey.toLowerCase().includes(normalizedQuery) ||
+            requirement.title.toLowerCase().includes(normalizedQuery),
+        ) ||
+        batch.environmentLabel.toLowerCase().includes(normalizedQuery) ||
+        batch.repositories.some((repository) =>
+          repository.toLowerCase().includes(normalizedQuery),
+        ) ||
+        batch.batchId.toLowerCase().includes(normalizedQuery),
+    );
+  }, [batches, filter, normalizedQuery]);
 
   async function open(batch: DeploymentBatchSummary) {
     setOpeningBatchId(batch.batchId);
@@ -157,6 +178,34 @@ export function LotesView() {
     }
   }
 
+  async function removeBatch(batch: DeploymentBatchSummary) {
+    setDeletingBatchId(batch.batchId);
+    try {
+      const result = await deleteDeploymentBatch(batch.batchId);
+      setDeleteTarget(null);
+      if (result.failedBranches.length > 0) {
+        toast.warning('Registro eliminado con avisos', {
+          description: `${result.deletedSessions} sesión(es) eliminadas. No se pudieron borrar: ${result.failedBranches.join(', ')}.`,
+        });
+      } else {
+        toast.success('Registro de despliegue eliminado', {
+          description: `${result.deletedSessions} sesión(es) eliminadas${
+            result.cleanedBranches.length > 0
+              ? `; ${result.cleanedBranches.length} rama(s) local(es) limpiadas`
+              : ''
+          }. El remoto y el ambiente no se tocaron.`,
+        });
+      }
+      void load();
+    } catch (caught) {
+      toast.error('No se pudo eliminar el registro', {
+        description: normalizeError(caught).message,
+      });
+    } finally {
+      setDeletingBatchId(null);
+    }
+  }
+
   return (
     <div className="batches">
       <section className="batches-summary" aria-label="Resumen de lotes">
@@ -179,21 +228,44 @@ export function LotesView() {
       </section>
 
       <div className="batches-toolbar">
-        <div className="batches-tabs">
-          <button
-            type="button"
-            className={`btn btn-sm ${filter === 'active' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilter('active')}
-          >
-            Activos
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilter('all')}
-          >
-            Todos
-          </button>
+        <div className="batches-toolbar-main">
+          <div className="batches-tabs">
+            <button
+              type="button"
+              className={`btn btn-sm ${filter === 'active' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilter('active')}
+            >
+              Activos
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilter('all')}
+            >
+              Todos
+            </button>
+          </div>
+          <div className="batches-search">
+            <Icon name="search" size={13} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar por requerimiento, repositorio o ambiente"
+              aria-label="Buscar lotes por requerimiento"
+              spellCheck={false}
+            />
+            {query ? (
+              <button
+                type="button"
+                className="batches-search-clear"
+                onClick={() => setQuery('')}
+                title="Limpiar búsqueda"
+                aria-label="Limpiar búsqueda"
+              >
+                <Icon name="x" size={11} />
+              </button>
+            ) : null}
+          </div>
         </div>
         <button
           type="button"
@@ -205,6 +277,13 @@ export function LotesView() {
           Actualizar
         </button>
       </div>
+
+      {normalizedQuery ? (
+        <p className="batches-search-hint">
+          {visible.length} de {batches.length} lote(s) coinciden con “{query.trim()}”.
+          La búsqueda incluye todos los lotes, no solo la pestaña activa.
+        </p>
+      ) : null}
 
       {error ? (
         <div className="batches-error">
@@ -228,14 +307,29 @@ export function LotesView() {
         <EmptyState
           icon={<Icon name="package" size={26} />}
           title={
-            filter === 'active'
-              ? 'No hay lotes activos'
-              : 'Todavía no hay lotes'
+            normalizedQuery
+              ? 'Sin resultados'
+              : filter === 'active'
+                ? 'No hay lotes activos'
+                : 'Todavía no hay lotes'
           }
           description={
-            filter === 'active'
-              ? 'Cuando prepares un despliegue desde Requerimientos, aparecerá aquí con su avance.'
-              : 'Selecciona requerimientos y usa “Preparar despliegue” para crear el primer lote.'
+            normalizedQuery
+              ? `Ningún lote coincide con “${query.trim()}”. Prueba con la clave del requerimiento, por ejemplo BPIM-152.`
+              : filter === 'active'
+                ? 'Cuando prepares un despliegue desde Requerimientos, aparecerá aquí con su avance.'
+                : 'Selecciona requerimientos y usa “Preparar despliegue” para crear el primer lote.'
+          }
+          action={
+            normalizedQuery ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuery('')}
+              >
+                Limpiar búsqueda
+              </button>
+            ) : undefined
           }
         />
       ) : (
@@ -247,9 +341,11 @@ export function LotesView() {
               opening={openingBatchId === batch.batchId}
               retrying={retryingBatchId === batch.batchId}
               cleaning={cleaningBatchId === batch.batchId}
+              deleting={deletingBatchId === batch.batchId}
               onOpen={() => void open(batch)}
               onRetry={() => void retry(batch)}
               onCleanup={() => setCleanupTarget(batch)}
+              onDelete={() => setDeleteTarget(batch)}
             />
           ))}
         </div>
@@ -257,6 +353,7 @@ export function LotesView() {
 
       {openBatch ? (
         <DeploymentWizardModal
+          key={openBatch.sessions.map((session) => session.id).join('|')}
           requirementIds={openBatch.requirementIds}
           initialSessions={openBatch.sessions}
           onClose={() => {
@@ -281,6 +378,22 @@ export function LotesView() {
           onClose={() => setCleanupTarget(null)}
         />
       ) : null}
+
+      {deleteTarget ? (
+        <ConfirmModal
+          title="Eliminar registro de despliegue"
+          message={`Se eliminará el registro del lote de ${deleteTarget.environmentLabel} (${deleteTarget.repositoryCount} repositorio(s), ${deleteTarget.requirementCount} requerimiento(s)) y se limpiarán los worktrees y ramas locales que queden. Las ramas ya empujadas a GitHub y el ambiente no se tocan.${
+            deleteTarget.pendingCount > 0 || deleteTarget.conflictCount > 0
+              ? ' Este lote tiene sesiones pendientes: al eliminar el registro ya no podrás reanudarlo desde FlowManager.'
+              : ''
+          }`}
+          confirmLabel="Eliminar registro"
+          tone="danger"
+          busy={deletingBatchId === deleteTarget.batchId}
+          onConfirm={() => void removeBatch(deleteTarget)}
+          onClose={() => setDeleteTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -290,17 +403,21 @@ function BatchCard({
   opening,
   retrying,
   cleaning,
+  deleting,
   onOpen,
   onRetry,
   onCleanup,
+  onDelete,
 }: {
   batch: DeploymentBatchSummary;
   opening: boolean;
   retrying: boolean;
   cleaning: boolean;
+  deleting: boolean;
   onOpen: () => void;
   onRetry: () => void;
   onCleanup: () => void;
+  onDelete: () => void;
 }) {
   const progress =
     batch.repositoryCount === 0
@@ -354,6 +471,16 @@ function BatchCard({
           >
             {opening ? <Spinner size="sm" /> : <Icon name="eye" size={13} />}
             {opening ? 'Abriendo…' : 'Abrir lote'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm batch-delete"
+            onClick={onDelete}
+            disabled={deleting || opening || retrying || cleaning}
+            title="Elimina el registro del lote en FlowManager y limpia los artefactos locales. No borra ramas del remoto ni modifica el ambiente."
+          >
+            {deleting ? <Spinner size="sm" /> : <Icon name="x" size={13} />}
+            {deleting ? 'Eliminando…' : 'Eliminar'}
           </button>
         </div>
       </div>

@@ -40,6 +40,18 @@ pub fn run() {
                 }
             };
 
+            // Aplicar la identidad Git configurada antes de cualquier commit.
+            if let Some(pool) = pool.as_ref() {
+                if let Ok(settings) = tauri::async_runtime::block_on(
+                    commands::settings::read_settings(pool),
+                ) {
+                    commands::settings::apply_git_identity(
+                        &settings.git_user_name,
+                        &settings.git_user_email,
+                    );
+                }
+            }
+
             let git = git::detect();
             if !git.available {
                 tracing::warn!(
@@ -105,6 +117,7 @@ pub fn run() {
             commands::squash::deployment_cleanup,
             commands::squash::deployment_batches_list,
             commands::squash::deployment_batch_sessions,
+            commands::squash::deployment_batch_delete,
             commands::squash::deployment_batch_retry,
             commands::presence::environment_status,
             commands::settings::settings_get,

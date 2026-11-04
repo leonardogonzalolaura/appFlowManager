@@ -761,7 +761,12 @@ export function DeploymentWizardModal({
               disabled={!canPrepare}
             >
               {preparing ? <Spinner size="sm" /> : <Icon name="package" size={14} />}
-              {preparing ? 'Unificando cambios…' : 'Preparar despliegue'}
+              {preparing ? 'Unificando cambios…' : (
+              <>
+               Preparar despliegue{' '}
+                 <StatusChip tone="info">{scopeLabel}</StatusChip>
+                </>
+              )}
             </button>
           </>
         ) : (

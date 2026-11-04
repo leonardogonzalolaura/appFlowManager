@@ -3,6 +3,7 @@ use chrono::Utc;
 use std::fs::File;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -10,6 +11,76 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Identidad que FlowManager aplica a los commits que crea. Nunca modifica
+/// `.gitconfig`: solo se inyecta como variables de entorno en los procesos Git
+/// hijos. Si está vacía, Git usa la configuración normal del repositorio/global.
+#[derive(Debug, Clone)]
+pub struct GitIdentity {
+    pub name: String,
+    pub email: String,
+}
+
+fn identity_slot() -> &'static RwLock<Option<GitIdentity>> {
+    static IDENTITY: OnceLock<RwLock<Option<GitIdentity>>> = OnceLock::new();
+    IDENTITY.get_or_init(|| RwLock::new(None))
+}
+
+pub fn set_identity(identity: Option<GitIdentity>) {
+    if let Ok(mut guard) = identity_slot().write() {
+        *guard = identity;
+    }
+}
+
+fn current_identity() -> Option<GitIdentity> {
+    identity_slot()
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn identity_env(identity: &GitIdentity) -> [(&'static str, &str); 4] {
+    [
+        ("GIT_AUTHOR_NAME", identity.name.as_str()),
+        ("GIT_AUTHOR_EMAIL", identity.email.as_str()),
+        ("GIT_COMMITTER_NAME", identity.name.as_str()),
+        ("GIT_COMMITTER_EMAIL", identity.email.as_str()),
+    ]
+}
+
+/// Lee `user.name` / `user.email` globales de Git. Es solo informativo: se
+/// muestra en Preferencias como el valor que se usa cuando no hay override.
+pub fn detect_global_identity() -> Option<GitIdentity> {
+    let name = run_git(
+        None,
+        &[
+            "config".to_string(),
+            "--global".to_string(),
+            "--get".to_string(),
+            "user.name".to_string(),
+        ],
+        Duration::from_secs(10),
+    )
+    .ok()
+    .filter(|run| run.success)
+    .map(|run| run.stdout)
+    .filter(|value| !value.is_empty())?;
+    let email = run_git(
+        None,
+        &[
+            "config".to_string(),
+            "--global".to_string(),
+            "--get".to_string(),
+            "user.email".to_string(),
+        ],
+        Duration::from_secs(10),
+    )
+    .ok()
+    .filter(|run| run.success)
+    .map(|run| run.stdout)
+    .filter(|value| !value.is_empty())?;
+    Some(GitIdentity { name, email })
+}
 
 #[derive(Debug, Clone)]
 pub struct GitRun {
@@ -38,6 +109,12 @@ pub fn run_git(cwd: Option<&Path>, args: &[String], timeout: Duration) -> Result
         .stderr(Stdio::from(stderr_file))
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never");
+
+    if let Some(identity) = current_identity() {
+        for (key, value) in identity_env(&identity) {
+            command.env(key, value);
+        }
+    }
 
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
@@ -404,5 +481,63 @@ mod tests {
             AppError::GitAuth(_) => {}
             other => panic!("se esperaba GitAuth, llegó {other:?}"),
         }
+    }
+
+    struct IdentityReset;
+
+    impl Drop for IdentityReset {
+        fn drop(&mut self) {
+            set_identity(None);
+        }
+    }
+
+    #[test]
+    fn configured_identity_is_used_for_commits() {
+        let _reset = IdentityReset;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path();
+        let run = run_git(
+            None,
+            &["init".to_string(), path.to_string_lossy().to_string()],
+            Duration::from_secs(30),
+        )
+        .expect("init");
+        assert!(run.success, "{}", run.stderr);
+
+        std::fs::write(path.join("a.txt"), "a\n").expect("write file");
+        let run = run_git(
+            Some(path),
+            &["add".to_string(), "a.txt".to_string()],
+            Duration::from_secs(30),
+        )
+        .expect("add");
+        assert!(run.success, "{}", run.stderr);
+
+        set_identity(Some(GitIdentity {
+            name: "extlegonzalo_belcorp".into(),
+            email: "extlegonzalo@belcorp.biz".into(),
+        }));
+        let run = run_git(
+            Some(path),
+            &["commit".to_string(), "-m".to_string(), "test".to_string()],
+            Duration::from_secs(30),
+        )
+        .expect("commit");
+        assert!(run.success, "{}", run.stderr);
+
+        let run = run_git(
+            Some(path),
+            &[
+                "log".to_string(),
+                "-1".to_string(),
+                "--format=%an|%ae|%cn|%ce".to_string(),
+            ],
+            Duration::from_secs(30),
+        )
+        .expect("log");
+        assert_eq!(
+            run.stdout,
+            "extlegonzalo_belcorp|extlegonzalo@belcorp.biz|extlegonzalo_belcorp|extlegonzalo@belcorp.biz"
+        );
     }
 }

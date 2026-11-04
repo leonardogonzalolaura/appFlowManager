@@ -1469,6 +1469,21 @@ code {
   padding: 0 18px 8px;
 }
 
+.preference-identity {
+  grid-column: 1 / -1;
+}
+
+.preference-identity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.preference-identity .btn {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+
 .settings-loading {
   display: flex;
   align-items: center;

@@ -35,6 +35,8 @@ export function SettingsView({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [baseBranch, setBaseBranch] = useState('');
   const [manualPrefix, setManualPrefix] = useState('');
+  const [gitUserName, setGitUserName] = useState('');
+  const [gitUserEmail, setGitUserEmail] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -44,6 +46,8 @@ export function SettingsView({
         setSettings(loaded);
         setBaseBranch(loaded.baseBranch);
         setManualPrefix(loaded.manualKeyPrefix);
+        setGitUserName(loaded.gitUserName);
+        setGitUserEmail(loaded.gitUserEmail);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -60,10 +64,14 @@ export function SettingsView({
       const updated = await updateSettings({
         baseBranch: baseBranch.trim(),
         manualKeyPrefix: manualPrefix.trim(),
+        gitUserName: gitUserName.trim(),
+        gitUserEmail: gitUserEmail.trim(),
       });
       setSettings(updated);
       setBaseBranch(updated.baseBranch);
       setManualPrefix(updated.manualKeyPrefix);
+      setGitUserName(updated.gitUserName);
+      setGitUserEmail(updated.gitUserEmail);
       toast.success('Preferencias guardadas');
     } catch (caught) {
       toast.error('No se pudieron guardar las preferencias', {
@@ -284,6 +292,49 @@ export function SettingsView({
                 Genera claves como {manualPrefix.trim() || 'MAN'}-0001. Letras y
                 números, entre 2 y 10 caracteres.
               </small>
+            </div>
+            <div className="field preference-identity">
+              <span className="field-label">Identidad Git para commits</span>
+              <div className="preference-identity-grid">
+                <input
+                  className="input"
+                  value={gitUserName}
+                  onChange={(event) => setGitUserName(event.target.value)}
+                  placeholder={settings?.gitConfigUserName ?? 'Nombre de Git'}
+                  aria-label="Nombre de autor Git"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <input
+                  className="input"
+                  value={gitUserEmail}
+                  onChange={(event) => setGitUserEmail(event.target.value)}
+                  placeholder={settings?.gitConfigUserEmail ?? 'correo@empresa.com'}
+                  aria-label="Correo de autor Git"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </div>
+              <small className="field-hint">
+                Déjalos vacíos para usar la configuración global de Git
+                {settings?.gitConfigUserName && settings.gitConfigUserEmail
+                  ? ` (${settings.gitConfigUserName} <${settings.gitConfigUserEmail}>)`
+                  : ' (no se detectó user.name/user.email global)'}
+                . FlowManager solo aplica esta identidad a los commits que crea; no
+                modifica tu .gitconfig ni afecta otras apps.
+              </small>
+              {gitUserName || gitUserEmail ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => {
+                    setGitUserName('');
+                    setGitUserEmail('');
+                  }}
+                >
+                  Usar configuración global
+                </button>
+              ) : null}
             </div>
           </div>
         )}

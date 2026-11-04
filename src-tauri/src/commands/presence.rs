@@ -1,5 +1,6 @@
 use crate::error::{ApiError, AppError};
 use crate::infra::squash_ops;
+use crate::infra::git_cli;
 use crate::state::AppState;
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -70,6 +71,7 @@ struct MappingRow {
     repository_name: String,
     local_path: String,
     remote_name: String,
+    remote_url: Option<String>,
     base_branch: String,
     branch_name: String,
     branch_status: String,
@@ -116,7 +118,7 @@ pub async fn environment_status(
                 continue;
             }
         }
-        let presence = build_requirement_presence(pool, &requirement_id).await?;
+        let presence = build_requirement_presence(pool, &requirement_id, force).await?;
         cache_store(&requirement_id, &presence);
         result.push(presence);
     }
@@ -147,6 +149,7 @@ fn cache_store(requirement_id: &str, value: &RequirementPresence) {
 async fn build_requirement_presence(
     pool: &SqlitePool,
     requirement_id: &str,
+    refresh_remote: bool,
 ) -> Result<RequirementPresence, AppError> {
     let external_key: Option<String> =
         sqlx::query_scalar("SELECT external_key FROM requirements WHERE id = ?1")
@@ -159,7 +162,7 @@ async fn build_requirement_presence(
 
     let mappings = sqlx::query_as::<_, MappingRow>(
         "SELECT rr.repository_id, r.name AS repository_name, r.local_path,
-                r.remote_name, r.base_branch,
+                r.remote_name, r.remote_url, r.base_branch,
                 rr.branch_name, rr.branch_status
          FROM requirement_repositories rr
          JOIN repositories r ON r.id = rr.repository_id
@@ -175,7 +178,9 @@ async fn build_requirement_presence(
     for mapping in mappings {
         let pool = pool.clone();
         let requirement_id = requirement_id.to_string();
-        tasks.spawn(async move { evaluate_repository(pool, &requirement_id, mapping).await });
+        tasks.spawn(async move {
+            evaluate_repository(pool, &requirement_id, mapping, refresh_remote).await
+        });
     }
     while let Some(joined) = tasks.join_next().await {
         match joined {
@@ -205,6 +210,7 @@ async fn evaluate_repository(
     pool: SqlitePool,
     requirement_id: &str,
     mapping: MappingRow,
+    refresh_remote: bool,
 ) -> Result<RepositoryPresence, AppError> {
     let envs = load_environments(&pool, &mapping.repository_id).await?;
     let history = load_history(&pool, requirement_id, &mapping.repository_id).await?;
@@ -213,12 +219,27 @@ async fn evaluate_repository(
     let branch_name = mapping.branch_name.clone();
     let branch_status = mapping.branch_status.clone();
 
-    let environments =
-        tokio::task::spawn_blocking(move || compute_repository(&mapping, &envs, &history))
-            .await
-            .map_err(|error| {
-                AppError::Validation(format!("No se pudo evaluar el repositorio: {error}"))
-            })?;
+    let environments = tokio::task::spawn_blocking(move || {
+        // Solo al pulsar "Ambientes" se actualizan los refs remotos. El fetch
+        // no toca ramas locales, el index ni el working tree.
+        let fetch_error = if refresh_remote && mapping.remote_url.is_some() {
+            match git_cli::fetch(Path::new(&mapping.local_path), &mapping.remote_name) {
+                Ok(run) if run.success => None,
+                Ok(run) => Some(
+                    git_cli::invalidate_run(&run, "No se pudo actualizar desde el remoto")
+                        .to_string(),
+                ),
+                Err(error) => Some(error.to_string()),
+            }
+        } else {
+            None
+        };
+        compute_repository(&mapping, &envs, &history, fetch_error)
+    })
+    .await
+    .map_err(|error| {
+        AppError::Validation(format!("No se pudo evaluar el repositorio: {error}"))
+    })?;
 
     Ok(RepositoryPresence {
         repository_id,
@@ -233,12 +254,14 @@ fn compute_repository(
     mapping: &MappingRow,
     envs: &[EnvRow],
     history: &HashMap<String, HistoryRow>,
+    fetch_error: Option<String>,
 ) -> Vec<EnvironmentPresence> {
     let repo_path = Path::new(&mapping.local_path);
     let remote = mapping.remote_name.as_str();
     let refs = squash_ops::ref_map(repo_path).unwrap_or_default();
 
-    let requirement_sha = resolve_branch_sha(&refs, remote, &mapping.branch_name, true);
+    let (requirement_sha, tip_warning) =
+        resolve_requirement_tip(repo_path, &refs, remote, &mapping.branch_name);
     let base_sha = resolve_branch_sha(&refs, remote, &mapping.base_branch, false);
 
     let (req_files, change_base) = match (requirement_sha.as_deref(), base_sha.as_deref()) {
@@ -249,7 +272,8 @@ fn compute_repository(
         _ => (Vec::new(), None),
     };
 
-    envs.iter()
+    let mut environments: Vec<EnvironmentPresence> = envs
+        .iter()
         .map(|env| {
             let env_history = history.get(&env.environment);
             compute_environment(
@@ -270,7 +294,69 @@ fn compute_repository(
                 )
             })
         })
-        .collect()
+        .collect();
+
+    // Notas transversales del repositorio: error de actualización o ramas
+    // local/remota divergentes. Se anexan al detalle de cada ambiente para que
+    // el tooltip explique con qué referencia se comparó.
+    let mut notes = Vec::new();
+    if let Some(error) = fetch_error {
+        notes.push(format!(
+            "No se pudo actualizar desde el remoto ({error}); se muestra el último estado conocido."
+        ));
+    }
+    if let Some(warning) = tip_warning {
+        notes.push(warning);
+    }
+    if !notes.is_empty() {
+        let prefix = notes.join(" ");
+        for env in &mut environments {
+            env.detail = Some(match env.detail.take() {
+                Some(detail) => format!("{prefix} {detail}"),
+                None => prefix.clone(),
+            });
+        }
+    }
+
+    environments
+}
+
+/// Elige el tip del requerimiento más actualizado entre la rama local y su
+/// tracking remoto. No modifica ninguna rama. Si las dos divergieron, usa la
+/// local y devuelve un aviso para que el usuario lo revise.
+fn resolve_requirement_tip(
+    repo_path: &Path,
+    refs: &HashMap<String, String>,
+    remote: &str,
+    branch: &str,
+) -> (Option<String>, Option<String>) {
+    let local = refs.get(&format!("refs/heads/{branch}")).cloned();
+    let remote_tip = refs
+        .get(&format!("refs/remotes/{remote}/{branch}"))
+        .cloned();
+
+    match (local, remote_tip) {
+        (Some(local), Some(remote_tip)) => {
+            if local == remote_tip {
+                return (Some(local), None);
+            }
+            let local_is_ancestor = squash_ops::is_ancestor(repo_path, &local, &remote_tip);
+            let remote_is_ancestor = squash_ops::is_ancestor(repo_path, &remote_tip, &local);
+            match (local_is_ancestor, remote_is_ancestor) {
+                // El remoto tiene commits que la local no tiene.
+                (Ok(true), _) => (Some(remote_tip), None),
+                // La local tiene commits sin empujar.
+                (_, Ok(true)) => (Some(local), None),
+                _ => (
+                    Some(local),
+                    Some(format!(
+                        "La rama local '{branch}' y '{remote}/{branch}' divergen; se usa la local como referencia."
+                    )),
+                ),
+            }
+        }
+        (local, remote_tip) => (local.or(remote_tip), None),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -669,5 +755,78 @@ mod tests {
     fn sin_cambios_propios_no_hay_nada_que_verificar() {
         let (counts, _) = evaluate_tips(Path::new("."), "aaa", "bbb", &[]).expect("counts");
         assert_eq!(counts.status, "no_changes");
+    }
+
+    #[test]
+    fn tip_prefiere_el_remoto_cuando_esta_adelante() {
+        let scenario = scenario();
+        let repo = Repository::open(&scenario.path).expect("open");
+        // La local se quedó en main; el remoto ya tiene el commit del feature.
+        repo.reference(
+            "refs/heads/feature/BPIM-1",
+            scenario.main,
+            true,
+            "test",
+        )
+        .expect("local atrasada");
+        repo.reference(
+            "refs/remotes/origin/feature/BPIM-1",
+            scenario.feature,
+            true,
+            "test",
+        )
+        .expect("remoto adelantado");
+
+        let refs = crate::infra::squash_ops::ref_map(&scenario.path).expect("refs");
+        let (tip, warning) =
+            resolve_requirement_tip(&scenario.path, &refs, "origin", "feature/BPIM-1");
+
+        assert_eq!(tip, Some(scenario.feature.to_string()));
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn tip_prefiere_la_local_cuando_tiene_commits_sin_empujar() {
+        let scenario = scenario();
+        let repo = Repository::open(&scenario.path).expect("open");
+        // El remoto se quedó en main; la local tiene el feature.
+        repo.reference("refs/remotes/origin/feature/BPIM-1", scenario.main, true, "test")
+            .expect("remoto atrasado");
+
+        let refs = crate::infra::squash_ops::ref_map(&scenario.path).expect("refs");
+        let (tip, warning) =
+            resolve_requirement_tip(&scenario.path, &refs, "origin", "feature/BPIM-1");
+
+        assert_eq!(tip, Some(scenario.feature.to_string()));
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn tip_avisa_cuando_local_y_remoto_divergen() {
+        let scenario = scenario();
+        let repo = Repository::open(&scenario.path).expect("open");
+        // El remoto crea un commit distinto desde main: ninguno es ancestro del otro.
+        let remote_feature = commit_files(
+            &repo,
+            "remote-feature",
+            Some(scenario.main),
+            &[("c.txt", "c-remote\n")],
+            "remote feature",
+        );
+        repo.reference(
+            "refs/remotes/origin/feature/BPIM-1",
+            remote_feature,
+            true,
+            "test",
+        )
+        .expect("remoto divergente");
+
+        let refs = crate::infra::squash_ops::ref_map(&scenario.path).expect("refs");
+        let (tip, warning) =
+            resolve_requirement_tip(&scenario.path, &refs, "origin", "feature/BPIM-1");
+
+        assert_eq!(tip, Some(scenario.feature.to_string()));
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("divergen"));
     }
 }

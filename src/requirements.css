@@ -320,6 +320,11 @@
   background: var(--red-soft);
 }
 
+.req-deploy:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .req-absent {
   display: inline-flex;
   margin-left: 4px;
@@ -872,6 +877,35 @@
   margin: 0 0 6px;
   color: var(--yellow);
   font-size: 9px;
+}
+
+.req-presence-legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.req-presence-legend svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.req-presence-legend code {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.req-presence-legend strong {
+  color: var(--text-secondary);
+  font-weight: 650;
 }
 
 .req-env-matrix {

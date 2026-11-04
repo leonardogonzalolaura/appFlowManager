@@ -59,10 +59,77 @@
   gap: 10px;
 }
 
+.batches-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .batches-tabs {
   display: flex;
   align-items: center;
   gap: 5px;
+  flex-shrink: 0;
+}
+
+.batches-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 210px;
+  max-width: 380px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.batches-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.1);
+}
+
+.batches-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 10.5px;
+}
+
+.batches-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.batches-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.batches-search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.batches-search-hint {
+  margin: -4px 0 0;
+  color: var(--text-muted);
+  font-size: 9px;
 }
 
 .batches-error {
@@ -139,6 +206,17 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.batch-delete {
+  color: var(--text-muted);
+}
+
+.batch-delete:hover:not(:disabled) {
+  color: var(--red);
+  background: var(--red-soft);
 }
 
 .batch-title-row strong {
