@@ -470,6 +470,35 @@ pub fn commit_is_merge(repo_path: &Path, sha: &str) -> Result<bool, AppError> {
     Ok(run.stdout.split_whitespace().count() > 2)
 }
 
+/// SHAs de los commits no-merge entre `base` y `tip`. Una sola invocación de
+/// Git; se usa para aplicar "todos los commits" con cherry-pick igual que la
+/// selección manual.
+pub fn non_merge_commits(
+    repo_path: &Path,
+    base: &str,
+    tip: &str,
+) -> Result<std::collections::HashSet<String>, AppError> {
+    let run = run_git(
+        Some(repo_path),
+        &[
+            "rev-list".to_string(),
+            "--no-merges".to_string(),
+            format!("{base}..{tip}"),
+        ],
+        Duration::from_secs(60),
+    )?;
+    if !run.success {
+        return Err(AppError::GitFailed(run.stderr));
+    }
+    Ok(run
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// Devuelve (timestamp, resumen) del commit.
 pub fn commit_meta(repo_path: &Path, sha: &str) -> Result<(i64, String), AppError> {
     let run = run_git(

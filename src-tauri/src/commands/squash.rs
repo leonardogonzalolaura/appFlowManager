@@ -221,6 +221,11 @@ struct SquashAction {
     kind: String,
     label: String,
     branch: Option<String>,
+    /// Tip de la rama al preparar el squash. Solo se usa para detectar que la
+    /// rama avanzó antes de aplicar; en acciones `cherry` el `sha` es el commit
+    /// que se aplica, no el tip.
+    #[serde(default)]
+    branch_sha: Option<String>,
     sha: Option<String>,
 }
 
@@ -532,20 +537,64 @@ async fn prepare_squash(
 
     let mut selected_commits: Vec<BranchCommit> = Vec::new();
     let actions = if strategy == "all_commits" {
-        active_mappings
-            .iter()
-            .enumerate()
-            .map(|(index, mapping)| SquashAction {
-                kind: "merge".into(),
-                label: mapping.external_key.clone(),
-                branch: Some(mapping.branch_name.clone()),
-                // Guardamos el tip de la rama al unificar: si luego se agregan
-                // commits, la rama hija no debe salir con el squash viejo.
-                sha: analyses
-                    .get(index)
-                    .and_then(|analysis| analysis.branch_sha.clone()),
-            })
-            .collect::<Vec<_>>()
+        // Aplicar los commits propios de cada rama (los mismos que muestra la
+        // UI), no un `merge --squash` de toda la rama. El merge arrastra
+        // commits de otras ramas integradas en la rama del requerimiento y
+        // produce conflictos que no aparecen al hacer el cherry-pick manual en
+        // TaruGit. Los merge commits se omiten porque no se pueden aplicar con
+        // cherry-pick.
+        let mut actions: Vec<SquashAction> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        // (rama, tip de la rama, commit) de todos los requerimientos.
+        let mut collected: Vec<(String, Option<String>, BranchCommit)> = Vec::new();
+        for (index, analysis) in analyses.iter().enumerate() {
+            let branch = active_mappings
+                .get(index)
+                .map(|mapping| mapping.branch_name.clone())
+                .unwrap_or_else(|| analysis.branch_name.clone());
+            let non_merge = match (
+                analysis.base_sha.as_deref(),
+                analysis.branch_sha.as_deref(),
+            ) {
+                (Some(base), Some(tip)) => {
+                    squash_ops::non_merge_commits(Path::new(&repo.local_path), base, tip)?
+                }
+                _ => analysis
+                    .commits
+                    .iter()
+                    .map(|commit| commit.sha.clone())
+                    .collect(),
+            };
+            for commit in &analysis.commits {
+                if !seen.insert(commit.sha.clone()) || !non_merge.contains(&commit.sha) {
+                    continue;
+                }
+                collected.push((
+                    branch.clone(),
+                    analysis.branch_sha.clone(),
+                    commit.clone(),
+                ));
+            }
+        }
+        collected.sort_by(|(_, _, left), (_, _, right)| {
+            left.committed_at
+                .cmp(&right.committed_at)
+                .then_with(|| left.sha.cmp(&right.sha))
+        });
+        let mut guarded: HashSet<String> = HashSet::new();
+        for (branch, branch_sha, commit) in collected {
+            // La primera acción de cada rama conserva su tip para detectar
+            // commits nuevos antes de aplicar.
+            let first = guarded.insert(branch.clone());
+            actions.push(SquashAction {
+                kind: "cherry".into(),
+                label: commit.summary.clone(),
+                branch: first.then(|| branch.clone()),
+                branch_sha: first.then(|| branch_sha.clone()).flatten(),
+                sha: Some(commit.sha.clone()),
+            });
+        }
+        actions
     } else {
         let allowed: std::collections::HashSet<String> = analyses
             .iter()
@@ -598,6 +647,7 @@ async fn prepare_squash(
                 kind: "cherry".into(),
                 label: commit.summary.clone(),
                 branch: None,
+                branch_sha: None,
                 sha: Some(commit.sha.clone()),
             })
             .collect::<Vec<_>>()
@@ -1089,11 +1139,14 @@ fn ensure_requirement_branches_current(
 ) -> Result<(), AppError> {
     let repo_path = Path::new(&repo.local_path);
     for action in &plan.actions {
-        if action.kind != "merge" {
-            continue;
-        }
-        let (Some(branch), Some(expected)) = (action.branch.as_deref(), action.sha.as_deref())
-        else {
+        let expected = action.branch_sha.as_deref().or_else(|| {
+            if action.kind == "merge" {
+                action.sha.as_deref()
+            } else {
+                None
+            }
+        });
+        let (Some(branch), Some(expected)) = (action.branch.as_deref(), expected) else {
             continue;
         };
         let current = squash_ops::rev_parse(repo_path, &format!("refs/heads/{branch}"))?
@@ -2980,6 +3033,32 @@ mod tests {
         )
     }
 
+    fn commit_merge(
+        repo: &Repository,
+        branch: &str,
+        parents: &[Oid],
+        files: &[(&str, &str)],
+        message: &str,
+    ) -> Oid {
+        let tree_id = tree_with_files(repo, parents.first().copied(), files);
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commits = parents
+            .iter()
+            .map(|oid| repo.find_commit(*oid).unwrap())
+            .collect::<Vec<_>>();
+        let refs = commits.iter().collect::<Vec<_>>();
+        let sig = signature();
+        repo.commit(
+            Some(&format!("refs/heads/{branch}")),
+            &sig,
+            &sig,
+            message,
+            &tree,
+            &refs,
+        )
+        .expect("merge commit")
+    }
+
     fn seed_repo(path: &Path) -> (Oid, Oid) {
         let repo = Repository::init(path).expect("init");
         let main = commit_on(&repo, "main", None, "README.md", "init");
@@ -3054,6 +3133,67 @@ mod tests {
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
             .expect("checkout");
         (main, dev)
+    }
+
+    fn seed_branch_with_merged_sibling(path: &Path) -> (Oid, Oid) {
+        let repo = Repository::init(path).expect("init");
+        let init = commit_files(
+            &repo,
+            "main",
+            None,
+            &[("README.md", "# base\n")],
+            "init",
+        );
+        // La rama del requerimiento y una rama ajena nacen del mismo punto.
+        let feature_a = commit_files(
+            &repo,
+            "feature/BPIM-1",
+            Some(init),
+            &[("feature.txt", "a\n")],
+            "feature a",
+        );
+        let sibling = commit_files(
+            &repo,
+            "feature/BPIM-2",
+            Some(init),
+            &[("sibling.txt", "s\n")],
+            "sibling b",
+        );
+        // main ya integró la rama ajena antes de que el requerimiento se
+        // actualizara: sus commits no deben viajar al ambiente.
+        let main_merge = commit_merge(
+            &repo,
+            "main",
+            &[init, sibling],
+            &[("sibling.txt", "s\n")],
+            "Merge sibling into main",
+        );
+        let feature_merge = commit_merge(
+            &repo,
+            "feature/BPIM-1",
+            &[feature_a, main_merge],
+            &[("sibling.txt", "s\n")],
+            "Merge main into feature",
+        );
+        commit_files(
+            &repo,
+            "feature/BPIM-1",
+            Some(feature_merge),
+            &[("feature2.txt", "c\n")],
+            "feature c",
+        );
+        // El ambiente se separó antes de que main integrara la rama ajena.
+        let dev = commit_files(
+            &repo,
+            "dev",
+            Some(init),
+            &[("dev.txt", "d\n")],
+            "dev base",
+        );
+        repo.set_head("refs/heads/main").expect("head");
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .expect("checkout");
+        (init, dev)
     }
 
     fn seed_fix_commit_repo(path: &Path) -> (Oid, Oid) {
@@ -3836,6 +3976,43 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim_end(), "two");
 
         cleanup_session(&pool, &applied).await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn deployment_all_commits_only_applies_requirement_commits() {
+        let (dir, pool, _repo_path) =
+            setup_deployment_internal(false, seed_branch_with_merged_sibling).await;
+        let worktrees = dir.path().join("worktrees");
+        let prepared = prepare_squash(
+            &pool,
+            &worktrees,
+            deployment_input(),
+            Some("dev".into()),
+            Some("dev".into()),
+            None,
+        )
+        .await
+        .expect("prepare");
+        assert_eq!(prepared.status, "ready");
+
+        let session = load_session(&pool, &prepared.id).await.expect("session");
+        let plan = parse_plan(&session.plan_json);
+        assert_eq!(plan.actions.len(), 2);
+        assert!(plan.actions.iter().all(|action| action.kind == "cherry"));
+        // La primera acción conserva el tip de la rama para la guarda de
+        // commits nuevos; las siguientes solo aplican su SHA.
+        assert!(plan.actions[0].branch_sha.is_some());
+        assert!(plan.actions[1].branch_sha.is_none());
+
+        let worktree = Path::new(&prepared.worktree_path);
+        assert!(worktree.join("feature.txt").exists());
+        assert!(worktree.join("feature2.txt").exists());
+        // La rama ajena que main ya integró no debe viajar al ambiente: antes
+        // se aplicaba con merge --squash y arrastraba este archivo.
+        assert!(!worktree.join("sibling.txt").exists());
+
+        cleanup_session(&pool, &prepared).await;
         pool.close().await;
     }
 

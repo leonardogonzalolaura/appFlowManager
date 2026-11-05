@@ -241,7 +241,7 @@ Esta corrección debe respetarse en cualquier implementación futura.
 1. Se crea un worktree aislado desde `origin/<base>`.
 2. Se crea una rama interna `flowmgr/squash/<run-id>` (no se empuja).
 3. Según la selección:
-   - **Todos los commits de cada rama:** `git merge --squash <rama>` por cada rama, con commits WIP internos, y al final `git reset --soft <base_sha>` + commit final.
+   - **Todos los commits de cada rama:** `git cherry-pick -n <sha>` de cada commit propio (los mismos que muestra la UI), en orden cronológico, con commits WIP internos, y al final `git reset --soft <base_sha>` + commit final. Los merge commits se omiten.
    - **Subconjunto de commits:** `git cherry-pick -n <sha>` en orden cronológico y commit final (con soft reset si se generaron commits intermedios).
 4. El mensaje final es editable, con plantilla y trailers de trazabilidad.
 5. Si no hay cambios netos, se marca `NoChanges` y no se empuja.
@@ -251,7 +251,7 @@ Esta corrección debe respetarse en cualquier implementación futura.
 1. Se resuelve la rama remota del ambiente (ej. `origin/release/1.0.5`).
 2. Se verifica que siga en el SHA de la vista previa; si cambió, `BaseDrift`.
 3. Se crea la rama hija `BPIM-183-qas` desde `origin/release/1.0.5`.
-4. Se aplica `git merge --squash flowmgr/squash/<run-id>`.
+4. Se aplica `git cherry-pick -n flowmgr/squash/<run-id>` y se crea el commit final.
 5. Se crea **un commit** con el mensaje final.
 6. Se muestra el diff y se pide confirmación de push.
 
@@ -1331,7 +1331,7 @@ git worktree add -b flowmgr/squash/<run_short> <worktree_path> origin/<base_bran
 ```bash
 # con el worktree limpio (ya se hizo el commit squash)
 git switch -c <deploy_branch> origin/<target_branch>
-git merge --squash flowmgr/squash/<run_short>
+git cherry-pick -n flowmgr/squash/<run_short>
 # resolver conflictos si aplica
 git commit -m "<mensaje final>"
 ```
@@ -1397,26 +1397,31 @@ git diff --name-status origin/<base>...<branch>
 
 ### 7.6 Estrategias de squash
 
-#### Estrategia A — `MergeSquash` (por defecto, todos los commits)
+#### Estrategia A — `CherryPick` de todos los commits (por defecto)
 
-Requisito original: "merge --squash de las ramas seleccionadas".
+Los commits que viajan son **solo los propios de la rama del requerimiento**
+(los mismos que lista la UI), no todo el diff de la rama contra el ambiente. Se
+aplican uno por uno para replicar el comportamiento de un cherry-pick manual
+en TaruGit. Un `merge --squash` de la rama arrastraría commits de otras ramas
+integradas en ella y produciría conflictos que no existen al hacer el
+cherry-pick.
 
 ```bash
 # worktree en flowmgr/squash/<run>, creado desde origin/<base>
-git merge --squash <branch_1>
-# si conflicto: pausa; al continuar se hace git add + git commit -m "wip: <branch_1>"
-git commit -m "wip: <branch_1>"
+git cherry-pick -n <sha_1>
+# si conflicto: pausa; al continuar se hace git add + git commit -m "wip: <sha_1>"
+git commit -m "wip: <sha_1>"
 
-git merge --squash <branch_2>
+git cherry-pick -n <sha_2>
 # ...
-git commit -m "wip: <branch_2>"
 
 # colapsar todos los WIP en un solo commit
 git reset --soft <base_sha>
 git commit -m "<mensaje final>"
 ```
 
-- Cada `merge --squash` deja cambios en índice/worktree; el commit WIP es necesario para poder aplicar el siguiente sin árbol sucio.
+- Los merge commits se omiten: no se pueden aplicar con cherry-pick y su contenido ya viene representado por los commits de la rama.
+- Cada `cherry-pick -n` deja cambios en índice/worktree; el commit WIP es necesario para poder aplicar el siguiente sin árbol sucio.
 - Los commits WIP viven solo en la rama interna; no se empujan.
 - Al final, `reset --soft` mueve HEAD a `base_sha` conservando el árbol; un único commit final.
 - Si una rama no tiene cambios respecto a la base, se omite.
@@ -1470,13 +1475,13 @@ FlowManager-Target: release/1.0.5
 git fetch origin --prune
 git rev-parse origin/<target_branch>       # verificar base drift
 git switch -c <deploy_branch> origin/<target_branch>
-git merge --squash flowmgr/squash/<run_short>
+git cherry-pick -n flowmgr/squash/<run_short>
 # conflicto -> pausa
 git commit -m "<mensaje final>"
 ```
 
 - La rama hija se crea **desde el remoto del ambiente**, no desde master.
-- El merge squash aplica el diff del squash sobre el árbol del ambiente; si el ambiente ya tiene parte de los cambios, puede haber conflicto y se resuelve.
+- El cherry-pick aplica el diff del squash sobre el árbol del ambiente; si el ambiente ya tiene parte de los cambios, puede haber conflicto y se resuelve.
 - Un solo commit en la rama hija.
 - Si el commit queda vacío (los cambios ya están en el ambiente), se marca `NoChanges` y no se empuja; se informa que probablemente ya está desplegado.
 
@@ -2016,7 +2021,7 @@ Paso 2 — **Requerimientos y repos**
 
 Paso 3 — **Commits y squash**
 - Por repo: ramas fuente, ahead/behind, lista de commits con checkbox (todos por defecto).
-- Estrategia: "Todos los commits (merge --squash)" o "Selección de commits (cherry-pick)".
+- Estrategia: "Todos los commits" (cherry-pick de los commits propios de la rama) o "Selección de commits" (cherry-pick del subconjunto).
 - Mensaje final editable, con preview.
 - Nombre de rama de despliegue editable (`BPIM-183-qas`).
 - Advertencia si hay commits ajenos o la rama está behind.
@@ -2831,7 +2836,7 @@ Al final de cada fase: demo, tests verdes, documento actualizado y tu confirmaci
 - Selección múltiple en la tabla de requerimientos (por fila y por página) con barra de acción “Preparar despliegue”.
 - `deployment_preview({ requirementIds, environment })`: agrupa repositorios, marca comunes/exclusivos, lista requerimientos sin mapeo y bloquea repos sin rama de ambiente.
 - `deployment_prepare`: crea una sesión de squash por repositorio usando la rama del ambiente como target; guarda `environment`, `target_branch`, `target_base_sha`.
-- La estrategia se elige por repositorio dentro del wizard: “Todos los commits” (`merge --squash`) o “Commits específicos” (`cherry-pick`). En el segundo caso `deployment_load_commits` lista los commits propios de la rama del requerimiento con checkbox, SHA, resumen, chip **Ajeno** cuando el mensaje no menciona la clave y contador `seleccionados/total`; los commits vienen preseleccionados y hay atajos **Todos** / **Ninguno**. Preparar con la lista vacía se bloquea con un mensaje claro.
+- La estrategia se elige por repositorio dentro del wizard: “Todos los commits” (cherry-pick de los commits propios de la rama, los mismos que lista el selector) o “Commits específicos” (cherry-pick del subconjunto). En ambos casos se aplica commit por commit y se colapsa en un solo commit; un `merge --squash` de la rama no se usa porque arrastra commits de otras ramas integradas y produce conflictos que no aparecen en un cherry-pick manual. `deployment_load_commits` lista los commits propios de la rama del requerimiento con checkbox, SHA, resumen, chip **Ajeno** cuando el mensaje no menciona la clave y contador `seleccionados/total`; los commits vienen preseleccionados y hay atajos **Todos** / **Ninguno**. Preparar con la lista vacía se bloquea con un mensaje claro.
 - La lista de commits se calcula contra la **rama base del requerimiento** (`requirement_repositories.base_branch`, normalmente `master`), no contra la rama del ambiente. Así una rama creada desde `master` y desplegada a `develop` no muestra los commits de `master` que todavía no están en `develop` ni los commits de otros requerimientos del mismo repositorio.
 - En repositorios compartidos, cada commit muestra la **rama del requerimiento que lo aporta** (`feature/BPIM-145`) en lugar del chip “Ajeno”; el tooltip incluye la clave del requerimiento. Así se distingue de qué requerimiento sale cada commit cuando varios comparten repositorio.
 - Los errores del wizard se muestran en un aviso **fijo en la parte superior** del cuerpo del modal (visible aunque estés al final), con opción de descartarlo y, cuando aplica, **Volver a preparar**. Si un repositorio quedó en “Commits específicos” sin selección, además aparece un aviso en línea dentro de ese repositorio.
