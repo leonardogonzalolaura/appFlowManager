@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { normalizeError } from '../../lib/api';
 import { copyText, formatDateTime, shortSha, truncateMiddle } from '../../lib/format';
@@ -1409,6 +1409,30 @@ function DeploymentSessionCard({
   onCopyPath,
 }: DeploymentSessionCardProps) {
   const [confirmAbort, setConfirmAbort] = useState(false);
+  const [copiedBranch, setCopiedBranch] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+  return () => {
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+  };
+}, []);
+
+async function handleCopyBranch() {
+  const branch = expectedDeployBranch(session);
+  try {
+    await copyText(branch);
+    setCopiedBranch(true);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopiedBranch(false), 1800);
+    toast.success('Nombre de la rama copiado', { description: branch });
+  } catch (caught) {
+    toast.error('No se pudo copiar el nombre de la rama', {
+      description: normalizeError(caught).message,
+    });
+  }
+}
+  
   const busy = Boolean(busyAction);
   const conflict = session.status === 'conflict';
   const pushed = Boolean(session.pushedSha);
@@ -1455,8 +1479,23 @@ function DeploymentSessionCard({
                   .map((requirement) => requirement.externalKey)
                   .join(', ')}
                 <span className="deployment-pending-branch">
-                  rama hija pendiente: <code>{expectedDeployBranch(session)}</code>
-                </span>
+  rama hija pendiente: <code>{expectedDeployBranch(session)}</code>
+  <button
+    type="button"
+    className="btn btn-icon btn-ghost btn-xs"
+    title={copiedBranch ? '¡Copiado!' : 'Copiar nombre de la rama'}
+    aria-label={copiedBranch ? '¡Copiado!' : 'Copiar nombre de la rama'}
+    onClick={() => void handleCopyBranch()}
+    disabled={busy}
+  >
+    <Icon name={copiedBranch ? 'check' : 'copy'} size={12} />
+  </button>
+  {copiedBranch ? (
+    <span className="branch-copied-hint" role="status">
+      ¡Copiado!
+    </span>
+  ) : null}
+</span>
               </>
             )}
             {session.environment ? (
@@ -1996,7 +2035,7 @@ function githubPullRequestUrl(session: SquashSession): string | null {
 
 async function openExternal(url: string) {
   try {
-    await openUrl(url);
+    await openUrl(url,'msedge');
   } catch (caught) {
     toast.error('No se pudo abrir el enlace', {
       description: normalizeError(caught).message,
