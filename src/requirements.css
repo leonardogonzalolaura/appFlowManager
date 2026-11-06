@@ -174,7 +174,7 @@
 
 .req-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 1280px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 10.5px;
@@ -234,7 +234,7 @@
 
 .req-title {
   display: block;
-  max-width: 310px;
+  max-width: 450px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1345,7 +1345,7 @@
   }
 
   .req-title {
-    max-width: 280px;
+    max-width: 400px;
   }
 
   .req-truncate {

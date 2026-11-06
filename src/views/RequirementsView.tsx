@@ -24,6 +24,7 @@ import { Callout } from '../components/ui/Callout';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
+import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { Spinner } from '../components/ui/Spinner';
 import { StatusChip } from '../components/ui/StatusChip';
 import { toast } from '../components/ui/Toast';
@@ -638,23 +639,17 @@ export function RequirementsView() {
             ))}
           </select>
 
-          <select
-            className="input req-select req-select-wide"
+          <SearchableSelect
+            className="searchable-select-wide"
             value={feature}
-            onChange={(event) => {
-              setFeature(event.target.value);
+            options={facets?.features ?? []}
+            onChange={(value) => {
+              setFeature(value);
               setPage(1);
             }}
-            aria-label="Feature"
-            autoComplete="off"
-          >
-            <option value="">Todas las features</option>
-            {facets?.features.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
+            allLabel="Todas las features"
+            ariaLabel="Feature"
+          />
 
           <label className="req-my-developer">
             <span>Yo soy</span>
