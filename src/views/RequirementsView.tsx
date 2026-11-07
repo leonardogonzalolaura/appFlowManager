@@ -1048,6 +1048,7 @@ function RequirementRow({
   onOpen: () => void;
   onArchive: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
   const deployable = !item.archivedAt && item.repoCount > 0;
   return (
     <tr className={`${item.archivedAt ? 'is-archived' : ''} ${selected ? 'is-selected' : ''}`.trim()}>
@@ -1066,9 +1067,27 @@ function RequirementRow({
         />
       </td>
       <td>
-        <button type="button" className="req-key" onClick={onOpen}>
-          {item.externalKey}
-        </button>
+        <span className="req-key-cell">
+          <button type="button" className="req-key" onClick={onOpen}>
+            {item.externalKey}
+          </button>
+          <button
+            type="button"
+            className={`btn btn-icon btn-ghost btn-xs req-copy-key${copied ? ' req-copy-key--done' : ''}`}
+            aria-label={`Copiar ${item.externalKey}`}
+            title={copied ? 'Copiado' : 'Copiar Task ID'}
+            onClick={(e) => {
+              e.stopPropagation();
+              void navigator.clipboard.writeText(item.externalKey).then(() => {
+                setCopied(true);
+                toast.success('Copiado', { description: item.externalKey });
+                window.setTimeout(() => setCopied(false), 2000);
+              });
+            }}
+          >
+            <Icon name={copied ? 'check' : 'copy'} size={12} />
+          </button>
+        </span>
       </td>
       <td>
         <StatusChip tone={item.source === 'manual' ? 'info' : 'neutral'}>
