@@ -153,7 +153,7 @@ function App() {
             onRefresh={() => void handleRefresh()}
           />
 
-          <div className="content">
+          <div className={`content${view === 'requerimientos' ? ' content--fill' : ''}`}>
             {view === 'inicio' ? (
               <HomeView
                 info={info}

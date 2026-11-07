@@ -179,6 +179,25 @@ code {
   margin-right: auto;
 }
 
+/* La vista de requerimientos necesita ocupar toda la altura disponible
+   y manejar su propio scroll interno (en el grid). */
+.content.content--fill {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.content.content--fill > * {
+  flex: 1;
+  min-height: 0;
+  /* conserva el max-width y centrado */
+  width: 100%;
+  max-width: 1240px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .content-footer {
   flex-shrink: 0;
   padding: 6px 30px;
