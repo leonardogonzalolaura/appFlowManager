@@ -15,6 +15,7 @@ import type {
   RequirementPage,
   SquashSession,
 } from '../types';
+import { useRequirementsFilters } from '../hooks/useRequirementsFilters';
 import { FeaturePickerModal } from '../components/requirements/FeaturePickerModal';
 import { ImportRequirementsModal } from '../components/requirements/ImportRequirementsModal';
 import { ManualRequirementModal } from '../components/requirements/ManualRequirementModal';
@@ -41,19 +42,38 @@ interface ArchiveTarget {
 }
 
 export function RequirementsView() {
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [source, setSource] = useState('');
-  const [developer, setDeveloper] = useState('');
-  const [statuses, setStatuses] = useState<string[]>([]);
-  const [priority, setPriority] = useState('');
-  const [feature, setFeature] = useState('');
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [onlyMine, setOnlyMine] = useState(false);
+  const { filters, update, reset } = useRequirementsFilters();
+  const {
+    searchInput,
+    source,
+    developer,
+    statuses,
+    priority,
+    feature,
+    includeArchived,
+    onlyMine,
+    page,
+  } = filters;
+
+  // alias de setters para mantener el resto del código igual
+  const setSearchInput  = (v: string)   => update('searchInput', v);
+  const setSource       = (v: string)   => update('source', v);
+  const setDeveloper    = (v: string)   => update('developer', v);
+  const setStatuses     = (v: string[]) => update('statuses', v);
+  const setPriority     = (v: string)   => update('priority', v);
+  const setFeature      = (v: string)   => update('feature', v);
+  const setIncludeArchived = (v: boolean) => update('includeArchived', v);
+  const setOnlyMine     = (v: boolean)  => update('onlyMine', v);
+  const setPage         = (v: number | ((prev: number) => number)) => {
+    update('page', typeof v === 'function' ? v(page) : v);
+  };
+
+  // search con debounce (valor aplicado al filtro real)
+  const [search, setSearch] = useState(searchInput);
+
   const [myDeveloper, setMyDeveloper] = useState(
     () => localStorage.getItem(MY_DEVELOPER_KEY) ?? '',
   );
-  const [page, setPage] = useState(1);
 
   const [data, setData] = useState<RequirementPage | null>(null);
   const [facets, setFacets] = useState<RequirementFacets | null>(null);
@@ -107,7 +127,7 @@ export function RequirementsView() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSearch(searchInput.trim());
-      setPage(1);
+      update('page', 1);
     }, 300);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
@@ -342,21 +362,14 @@ export function RequirementsView() {
       });
       return;
     }
-    setOnlyMine((value) => !value);
-    setPage(1);
+    setOnlyMine(!onlyMine);
+    update('page', 1);
   }
 
   function clearFilters() {
-    setSearchInput('');
+    reset();
     setSearch('');
-    setSource('');
-    setDeveloper('');
-    setStatuses([]);
-    setPriority('');
-    setFeature('');
-    setIncludeArchived(false);
     setOnlyMine(false);
-    setPage(1);
   }
 
   async function refreshAll() {
