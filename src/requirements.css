@@ -1664,3 +1664,161 @@ tr:hover .req-copy-key,
   color: var(--text-muted);
   font-size: 10px;
 }
+
+/* ==========================================================================
+   Status Multi-Select (solo trigger + dropdown)
+   ========================================================================== */
+
+.status-multiselect-anchor {
+  position: relative;
+}
+
+.status-multiselect-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.status-multiselect-trigger:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.status-multiselect-trigger.is-open,
+.status-multiselect-trigger:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.1);
+  outline: none;
+}
+
+.status-multiselect-trigger.has-value {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.status-multiselect-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.status-multiselect-trigger svg:last-child {
+  transition: transform 120ms ease;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.status-multiselect-trigger.is-open svg:last-child {
+  transform: rotate(180deg);
+}
+
+.status-multiselect-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-multiselect-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 80ms ease;
+}
+
+.status-multiselect-option:hover {
+  background: var(--bg-hover);
+}
+
+/* ==========================================================================
+   Barra de filtros activos (encima del grid)
+   ========================================================================== */
+
+.req-active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.req-active-filters-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.req-active-filters-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+
+.req-active-filters-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.req-active-filters-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.req-active-filters-chip-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.req-active-filters-clear {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.req-active-filters-clear:hover {
+  color: var(--text-primary);
+}

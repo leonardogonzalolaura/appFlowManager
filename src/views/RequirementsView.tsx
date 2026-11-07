@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeError } from '../lib/api';
 import { formatDateTime, withAlpha } from '../lib/format';
 import {
@@ -45,7 +45,7 @@ export function RequirementsView() {
   const [search, setSearch] = useState('');
   const [source, setSource] = useState('');
   const [developer, setDeveloper] = useState('');
-  const [status, setStatus] = useState('');
+  const [statuses, setStatuses] = useState<string[]>([]);
   const [priority, setPriority] = useState('');
   const [feature, setFeature] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -123,7 +123,7 @@ export function RequirementsView() {
         : developer
           ? [developer]
           : undefined,
-      status: status || undefined,
+      statuses: statuses.length > 0 ? statuses : undefined,
       priority: priority || undefined,
       feature: feature || undefined,
       includeArchived,
@@ -134,7 +134,7 @@ export function RequirementsView() {
       developer,
       onlyMine,
       myDeveloper,
-      status,
+      statuses,
       priority,
       feature,
       includeArchived,
@@ -351,7 +351,7 @@ export function RequirementsView() {
     setSearch('');
     setSource('');
     setDeveloper('');
-    setStatus('');
+    setStatuses([]);
     setPriority('');
     setFeature('');
     setIncludeArchived(false);
@@ -395,7 +395,7 @@ export function RequirementsView() {
     search ||
       source ||
       developer ||
-      status ||
+      statuses.length > 0 ||
       priority ||
       feature ||
       includeArchived ||
@@ -594,23 +594,14 @@ export function RequirementsView() {
             <option value="manual">Manual</option>
           </select>
 
-          <select
-            className="input req-select"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
+          <StatusMultiSelect
+            options={facets?.statuses ?? []}
+            value={statuses}
+            onChange={(value) => {
+              setStatuses(value);
               setPage(1);
             }}
-            aria-label="Estado"
-            autoComplete="off"
-          >
-            <option value="">Todos los estados</option>
-            {facets?.statuses.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
+          />
 
           <select
             className="input req-select"
@@ -760,6 +751,40 @@ export function RequirementsView() {
             </button>
           </div>
         </section>
+      ) : null}
+
+      {statuses.length > 0 ? (
+        <div className="req-active-filters" aria-label="Filtros activos">
+          <span className="req-active-filters-label">
+            <Icon name="list" size={12} />
+            Filtrando por estado:
+          </span>
+          <div className="req-active-filters-chips">
+            {statuses.map((s) => (
+              <span key={s} className="req-active-filters-chip">
+                <StatusChip tone={statusTone(s)}>{s}</StatusChip>
+                <button
+                  type="button"
+                  className="req-active-filters-chip-remove"
+                  aria-label={`Quitar estado ${s}`}
+                  onClick={() => {
+                    setStatuses(statuses.filter((v) => v !== s));
+                    setPage(1);
+                  }}
+                >
+                  <Icon name="x" size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs req-active-filters-clear"
+            onClick={() => { setStatuses([]); setPage(1); }}
+          >
+            Limpiar estados
+          </button>
+        </div>
       ) : null}
 
       <section className="surface req-table-panel">
@@ -1181,6 +1206,80 @@ function RequirementRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function StatusMultiSelect({
+  options,
+  value,
+  onChange,
+}: {
+  options: string[];
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const available = options.filter((o) => !value.includes(o));
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (open && available.length === 0) setOpen(false);
+  }, [open, available.length]);
+
+  function add(option: string) {
+    onChange([...value, option]);
+  }
+
+  return (
+    <div ref={containerRef} className="status-multiselect-anchor">
+      <button
+        type="button"
+        className={`status-multiselect-trigger ${open ? 'is-open' : ''} ${value.length > 0 ? 'has-value' : ''}`.trim()}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Filtrar por estado"
+        disabled={available.length === 0}
+      >
+        <Icon name="plus" size={12} />
+        <span>{value.length === 0 ? 'Estado' : 'Agregar estado'}</span>
+        {available.length > 0 ? <Icon name="chevron-down" size={12} /> : null}
+      </button>
+
+      {open ? (
+        <div
+          className="status-multiselect-popover"
+          role="listbox"
+          aria-label="Estados disponibles"
+        >
+          {available.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className="status-multiselect-option"
+              role="option"
+              aria-selected={false}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => add(option)}
+            >
+              <StatusChip tone={statusTone(option)}>{option}</StatusChip>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

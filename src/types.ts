@@ -188,7 +188,7 @@ export interface RequirementFilter {
   search?: string;
   source?: string;
   developers?: string[];
-  status?: string;
+  statuses?: string[];
   priority?: string;
   feature?: string;
   includeArchived?: boolean;

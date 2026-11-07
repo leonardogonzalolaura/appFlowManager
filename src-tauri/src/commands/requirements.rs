@@ -213,7 +213,7 @@ pub struct RequirementFilter {
     pub search: Option<String>,
     pub source: Option<String>,
     pub developers: Option<Vec<String>>,
-    pub status: Option<String>,
+    pub statuses: Option<Vec<String>>,
     pub priority: Option<String>,
     pub feature: Option<String>,
     pub include_archived: Option<bool>,
@@ -451,15 +451,19 @@ fn push_filters(query: &mut QueryBuilder<'_, Sqlite>, filter: &RequirementFilter
         }
         query.push(")");
     }
-    if let Some(status) = filter
-        .status
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+    if let Some(statuses) = filter
+        .statuses
+        .as_ref()
+        .filter(|values| !values.is_empty())
     {
-        query
-            .push(" AND lower(status) = ")
-            .push_bind(status.to_lowercase());
+        query.push(" AND lower(status) IN (");
+        for (index, status) in statuses.iter().enumerate() {
+            if index > 0 {
+                query.push(", ");
+            }
+            query.push_bind(status.trim().to_lowercase());
+        }
+        query.push(")");
     }
     if let Some(priority) = filter
         .priority

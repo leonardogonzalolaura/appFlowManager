@@ -175,7 +175,7 @@ function demoPage(
     ) {
       return false;
     }
-    if (filter.status && item.status !== filter.status) return false;
+    if (filter.statuses?.length && !filter.statuses.includes(item.status ?? '')) return false;
     if (filter.priority && item.priority !== filter.priority) return false;
     if (search) {
       const haystack = `${item.externalKey} ${item.title} ${item.feature ?? ''}`.toLowerCase();
