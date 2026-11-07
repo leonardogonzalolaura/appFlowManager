@@ -15,6 +15,7 @@ import type {
   RequirementPage,
   SquashSession,
 } from '../types';
+import { FeaturePickerModal } from '../components/requirements/FeaturePickerModal';
 import { ImportRequirementsModal } from '../components/requirements/ImportRequirementsModal';
 import { ManualRequirementModal } from '../components/requirements/ManualRequirementModal';
 import { RequirementDetailModal } from '../components/requirements/RequirementDetailModal';
@@ -73,6 +74,8 @@ export function RequirementsView() {
   const [deployRequirementIds, setDeployRequirementIds] = useState<string[]>([]);
   const [deployInitialSessions, setDeployInitialSessions] =
     useState<SquashSession[]>([]);
+  const [featurePickerOpen, setFeaturePickerOpen] = useState(false);
+
   const [deploymentToCancel, setDeploymentToCancel] = useState<
     SquashSession[] | null
   >(null);
@@ -81,6 +84,25 @@ export function RequirementsView() {
     null,
   );
   const [discardingSquash, setDiscardingSquash] = useState(false);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'h'
+      ) {
+        // No interceptar cuando el foco está en un input/textarea/select
+        const tag = (document.activeElement as HTMLElement | null)?.tagName ?? '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        event.preventDefault();
+        setFeaturePickerOpen((open) => !open);
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -993,6 +1015,18 @@ export function RequirementsView() {
           busy={archiving}
           onConfirm={() => void confirmArchive()}
           onClose={() => setArchiveTarget(null)}
+        />
+      ) : null}
+
+      {featurePickerOpen && facets ? (
+        <FeaturePickerModal
+          features={facets.features}
+          currentFeature={feature}
+          onSelect={(selectedFeature) => {
+            setFeature(selectedFeature);
+            setPage(1);
+          }}
+          onClose={() => setFeaturePickerOpen(false)}
         />
       ) : null}
     </div>
