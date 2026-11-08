@@ -605,6 +605,8 @@ export interface DbExecutionSummary {
   executedAt: string;
 }
 
+export type NoteLevel = 'info' | 'warning' | 'danger';
+
 export interface RequirementDetail {
   id: string;
   externalKey: string;
@@ -631,6 +633,7 @@ export interface RequirementDetail {
   isActive: boolean;
   archivedAt: string | null;
   notes: string | null;
+  noteLevel: NoteLevel;
   createdAt: string;
   updatedAt: string;
   subtasks: RequirementSubtask[];
@@ -742,5 +745,6 @@ export interface ManualRequirementPatch {
   status?: string;
   priority?: string;
   notes?: string;
+  noteLevel?: NoteLevel;
   manualLocked?: boolean;
 }

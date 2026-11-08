@@ -17,6 +17,9 @@
         {
           "url": "https://github.com/*",
           "app": "msedge"
+        },
+        {
+          "url": "https://www.atechlo-app.site/*"
         }
       ]
     },

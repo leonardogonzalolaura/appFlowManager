@@ -212,14 +212,46 @@ code {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
   width: 100%;
   max-width: 1240px;
   margin: 0 auto;
+  text-align: center;
 }
 
 .content-footer-sep {
   opacity: 0.5;
+}
+
+.content-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.content-footer-link svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity 120ms ease;
+}
+
+.content-footer-link:hover {
+  color: var(--text-primary);
+}
+
+.content-footer-link:hover svg {
+  opacity: 1;
+}
+
+.content-footer-link:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 /* ==========================================================================

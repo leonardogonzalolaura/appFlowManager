@@ -1,0 +1,175 @@
+/* ==========================================================================
+   Tabs · píldora con glider deslizante
+   ========================================================================== */
+
+.tabs {
+  min-width: 0;
+}
+
+.tabs-track {
+  --tabs-tone: var(--accent);
+  --tabs-tone-soft: var(--accent-soft);
+  --tabs-tone-border: var(--accent-border);
+
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-base);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tabs-track::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs-track[data-tone='info'] {
+  --tabs-tone: var(--accent);
+  --tabs-tone-soft: var(--accent-soft);
+  --tabs-tone-border: var(--accent-border);
+}
+
+.tabs-track[data-tone='warning'] {
+  --tabs-tone: var(--yellow);
+  --tabs-tone-soft: var(--yellow-soft);
+  --tabs-tone-border: var(--yellow-border);
+}
+
+.tabs-track[data-tone='danger'] {
+  --tabs-tone: var(--red);
+  --tabs-tone-soft: var(--red-soft);
+  --tabs-tone-border: var(--red-border);
+}
+
+.tabs-glider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border: 1px solid var(--tabs-tone-border);
+  border-radius: var(--radius-pill);
+  background: var(--tabs-tone-soft);
+  box-shadow:
+    inset 0 0 18px -6px var(--tabs-tone),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  pointer-events: none;
+  transition:
+    transform 240ms cubic-bezier(0.2, 0.85, 0.25, 1),
+    width 240ms cubic-bezier(0.2, 0.85, 0.25, 1),
+    height 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.tabs-tab {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.tabs-tab svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.tabs-tab:hover {
+  color: var(--text-secondary);
+}
+
+.tabs-tab.is-active {
+  color: var(--text-primary);
+}
+
+.tabs-tab.is-active svg {
+  color: var(--tabs-tone);
+  opacity: 1;
+}
+
+.tabs-tab:focus-visible {
+  outline: 2px solid var(--tabs-tone-border);
+  outline-offset: -2px;
+}
+
+.tabs-label {
+  line-height: 1;
+}
+
+.tabs-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.tabs-tab.is-active .tabs-count {
+  border-color: var(--tabs-tone-border);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.tabs-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--tabs-dot, var(--tabs-tone));
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.035);
+}
+
+.tabs-tab[data-tone='info'] {
+  --tabs-dot: var(--accent);
+}
+
+.tabs-tab[data-tone='warning'] {
+  --tabs-dot: var(--yellow);
+}
+
+.tabs-tab[data-tone='danger'] {
+  --tabs-dot: var(--red);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabs-glider,
+  .tabs-tab,
+  .tabs-tab svg,
+  .tabs-count {
+    transition: none;
+  }
+}

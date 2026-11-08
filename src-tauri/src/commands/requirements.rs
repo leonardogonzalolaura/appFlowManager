@@ -78,6 +78,7 @@ pub struct RequirementDetail {
     pub is_active: bool,
     pub archived_at: Option<String>,
     pub notes: Option<String>,
+    pub note_level: String,
     pub created_at: String,
     pub updated_at: String,
     pub subtasks: Vec<SubtaskDto>,
@@ -256,6 +257,7 @@ pub struct ManualRequirementPatch {
     pub status: Option<String>,
     pub priority: Option<String>,
     pub notes: Option<String>,
+    pub note_level: Option<String>,
     pub manual_locked: Option<bool>,
 }
 
@@ -315,6 +317,7 @@ struct RequirementRow {
     is_active: i64,
     archived_at: Option<String>,
     notes: Option<String>,
+    note_level: String,
     created_at: String,
     updated_at: String,
 }
@@ -534,7 +537,7 @@ async fn load_requirement(
                 informed_raw, subtasks_summary, timeline_start, timeline_end,
                 monday_doc_url, source_created_at, source_updated_at, first_seen_at,
                 last_seen_at, last_import_present, manual_created, manual_locked,
-                is_active, archived_at, notes, created_at, updated_at
+                is_active, archived_at, notes, note_level, created_at, updated_at
          FROM requirements WHERE id = ?1",
     )
     .bind(requirement_id)
@@ -595,6 +598,7 @@ async fn detail_from_row(
         is_active: row.is_active == 1,
         archived_at: row.archived_at,
         notes: row.notes,
+        note_level: row.note_level,
         created_at: row.created_at,
         updated_at: row.updated_at,
         subtasks,
@@ -1374,10 +1378,13 @@ pub async fn requirements_update_manual(
             .into());
         }
         sqlx::query(
-            "UPDATE requirements SET notes = ?1, manual_locked = ?2, updated_at = ?3
-             WHERE id = ?4",
+            "UPDATE requirements SET
+               notes = ?1, note_level = COALESCE(?2, note_level),
+               manual_locked = ?3, updated_at = ?4
+             WHERE id = ?5",
         )
         .bind(trimmed_optional(patch.notes))
+        .bind(normalize_note_level(patch.note_level))
         .bind(
             patch
                 .manual_locked
@@ -1401,8 +1408,9 @@ pub async fn requirements_update_manual(
             "UPDATE requirements SET
                title = ?1, type = ?2, feature = ?3, status = ?4, priority = ?5,
                developer_raw = ?6, developer_normalized = ?7, qa_raw = ?8,
-               notes = ?9, manual_locked = ?10, updated_at = ?11
-             WHERE id = ?12",
+               notes = ?9, note_level = COALESCE(?10, note_level),
+               manual_locked = ?11, updated_at = ?12
+             WHERE id = ?13",
         )
         .bind(&title)
         .bind(trimmed_optional(patch.requirement_type).or(current.requirement_type))
@@ -1413,6 +1421,7 @@ pub async fn requirements_update_manual(
         .bind(developer.as_deref().map(normalize_person))
         .bind(trimmed_optional(patch.qa).or(current.qa_raw))
         .bind(trimmed_optional(patch.notes))
+        .bind(normalize_note_level(patch.note_level))
         .bind(
             patch
                 .manual_locked
@@ -1571,6 +1580,12 @@ fn trimmed_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn normalize_note_level(value: Option<String>) -> Option<String> {
+    trimmed_optional(value)
+        .map(|value| value.to_lowercase())
+        .filter(|value| matches!(value.as_str(), "info" | "warning" | "danger"))
 }
 
 fn normalize_person(value: &str) -> String {

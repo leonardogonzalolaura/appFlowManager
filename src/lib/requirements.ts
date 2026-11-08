@@ -222,6 +222,7 @@ function demoDetail(requirementId: string): RequirementDetail {
     manualLocked: false,
     isActive: true,
     notes: 'Nota local de ejemplo.',
+    noteLevel: 'warning',
     createdAt: '2026-10-31T12:00:00Z',
     subtasks: [
       {

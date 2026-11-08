@@ -177,12 +177,12 @@ mod tests {
         let backups = dir.path().join("backups");
 
         let pool = connect(&db_path, &backups).await.expect("first connect");
-        assert_eq!(schema_version(&pool).await.expect("schema"), 10);
+        assert_eq!(schema_version(&pool).await.expect("schema"), 11);
         assert_eq!(count(&pool, Table::Repositories).await.expect("count"), 0);
         pool.close().await;
 
         let pool = connect(&db_path, &backups).await.expect("second connect");
-        assert_eq!(schema_version(&pool).await.expect("schema"), 10);
+        assert_eq!(schema_version(&pool).await.expect("schema"), 11);
         pool.close().await;
     }
 
