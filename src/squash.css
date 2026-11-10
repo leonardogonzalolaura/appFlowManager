@@ -347,3 +347,29 @@
     flex-wrap: wrap;
   }
 }
+
+/* ── Encabezado del campo de requerimientos con botones de copia ── */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.squash-copy-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.squash-copy-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  opacity: 0.75;
+}
+
+.squash-copy-actions .btn:hover {
+  opacity: 1;
+}

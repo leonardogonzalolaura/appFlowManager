@@ -490,7 +490,52 @@ export function SquashWizardModal({ onClose, onChanged }: SquashWizardModalProps
               </Callout>
             ) : (
               <div className="field">
-                <span className="field-label">Requerimientos</span>
+                <div className="field-label-row">
+                  <span className="field-label">Requerimientos</span>
+                  <div className="squash-copy-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      title="Copiar lista completa (clave, título, rama, commits)"
+                      onClick={() => {
+                        const text = candidates
+                          .map(
+                            (c) =>
+                              `${c.externalKey}: ${c.title}\n  Rama: ${c.branchName} · ${c.ahead} commit(s)${c.warning ? ` · ⚠ ${c.warning}` : ''}`,
+                          )
+                          .join('\n');
+                        void copyText(text).then(() =>
+                          toast.success('Lista copiada', {
+                            description: `${candidates.length} requerimiento(s)`,
+                          }),
+                        );
+                      }}
+                      disabled={preparing}
+                    >
+                      <Icon name="copy" size={12} />
+                      Copiar todo
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs"
+                      title="Copiar solo rama y descripción"
+                      onClick={() => {
+                        const text = candidates
+                          .map((c) => `${c.externalKey}: ${c.title} — ${c.branchName}`)
+                          .join('\n');
+                        void copyText(text).then(() =>
+                          toast.success('Ramas copiadas', {
+                            description: `${candidates.length} requerimiento(s)`,
+                          }),
+                        );
+                      }}
+                      disabled={preparing}
+                    >
+                      <Icon name="copy" size={12} />
+                      Copiar ramas
+                    </button>
+                  </div>
+                </div>
                 <div className="squash-candidates">
                   {candidates.map((candidate) => (
                     <label
