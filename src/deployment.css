@@ -700,3 +700,28 @@
   color: var(--text-muted);
   font-size: 9.5px;
 }
+
+.deployment-env-select {
+  font-size: 11px;
+  padding: 3px 22px 3px 8px;
+  height: auto;
+  min-width: 140px;
+  max-width: 200px;
+  font-weight: 600;
+}
+
+.deployment-wizard-modal .modal-title-row {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.deployment-wizard-modal .modal-title-row .modal-title {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.deployment-preview-refreshing {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}

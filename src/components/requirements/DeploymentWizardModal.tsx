@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { normalizeError } from '../../lib/api';
-import { copyText, formatDateTime, shortSha, truncateMiddle } from '../../lib/format';
+import { copyText, formatDateTime, shortSha, truncateMiddle, withAlpha } from '../../lib/format';
 import {
   applyDeployment,
   cleanupDeployment,
@@ -729,6 +729,18 @@ export function DeploymentWizardModal({
     activeEnvironments.length > 1
       ? `${activeEnvironments.length} ambientes`
       : environmentLabel;
+
+  const environmentColor =
+    environments.find((item) => item.key === environment)?.color ?? null;
+
+  function envChipStyle(color: string | null): React.CSSProperties | undefined {
+    if (!color) return undefined;
+    return {
+      color,
+      backgroundColor: withAlpha(color, 0.12),
+      borderColor: withAlpha(color, 0.35),
+    };
+  }
   const activeSessions = sessions.filter((session) => session.status !== 'aborted');
   const completedDeployment =
     activeSessions.length > 0 &&
@@ -739,10 +751,38 @@ export function DeploymentWizardModal({
   return (
     <Modal
       title="Preparar despliegue"
+      className="deployment-wizard-modal"
       description={
         sessions.length === 0
           ? `${requirementIds.length} requerimiento(s) seleccionados · elige el ambiente destino.`
           : `${scopeLabel} · ${sessions.length} repositorio(s)`
+      }
+      badge={
+        sessions.length === 0 ? (
+          <select
+            id="deployment-env"
+            className="input deployment-env-select"
+            value={environment}
+            onChange={(event) => setEnvironment(event.target.value)}
+            disabled={preparing}
+            autoComplete="off"
+            style={environment && environmentColor ? {
+              color: environmentColor,
+              borderColor: withAlpha(environmentColor, 0.5),
+            } : undefined}
+          >
+            <option value="">Selecciona un ambiente…</option>
+            {environments.map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.label} · {item.key}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <StatusChip tone="info" style={envChipStyle(environmentColor)}>
+            {scopeLabel}
+          </StatusChip>
+        )
       }
       size="lg"
       icon={<Icon name="rocket" size={20} />}
@@ -761,12 +801,7 @@ export function DeploymentWizardModal({
               disabled={!canPrepare}
             >
               {preparing ? <Spinner size="sm" /> : <Icon name="package" size={14} />}
-              {preparing ? 'Unificando cambios…' : (
-              <>
-               Preparar despliegue{' '}
-                 <StatusChip tone="info">{scopeLabel}</StatusChip>
-                </>
-              )}
+              {preparing ? 'Unificando cambios…' : 'Preparar despliegue'}
             </button>
           </>
         ) : (
@@ -876,33 +911,6 @@ export function DeploymentWizardModal({
 
       {sessions.length === 0 ? (
         <div className="deployment-setup">
-          <div className="field">
-            <label className="field-label" htmlFor="deployment-env">
-              Ambiente destino
-            </label>
-            <select
-              id="deployment-env"
-              className="input"
-              value={environment}
-              onChange={(event) => setEnvironment(event.target.value)}
-              disabled={preparing}
-              autoComplete="off"
-            >
-              <option value="">Selecciona un ambiente</option>
-              {environments.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label} · {item.key}
-                </option>
-              ))}
-            </select>
-            <p className="field-hint">
-              FlowManager unifica los cambios y crea una rama hija nueva a partir de la
-              rama configurada para este ambiente. Esa rama es la que luego empujas. El
-              ambiente no se modifica ni se empuja. Nunca se toca <code>dev</code>,{' '}
-              <code>qas</code>, <code>uat</code>, <code>prd</code> ni{' '}
-              <code>release/*</code>.
-            </p>
-          </div>
 
           <div className="field">
             <label className="field-label" htmlFor="deployment-message">
@@ -924,14 +932,14 @@ export function DeploymentWizardModal({
             </p>
           </div>
 
-          {loadingPreview ? (
+          {loadingPreview && !preview ? (
             <div className="env-manager-loading">
               <Spinner size="md" label="Analizando repositorios y ramas…" />
             </div>
           ) : null}
 
-          {preview && !loadingPreview ? (
-            <>
+          {preview ? (
+            <div className={loadingPreview ? 'deployment-preview-refreshing' : undefined}>
               <div className="deployment-summary">
                 <div className="deployment-stat">
                   <span>Requerimientos</span>
@@ -1232,7 +1240,7 @@ export function DeploymentWizardModal({
                   crea desde la rama del ambiente y solo esa rama hija se empuja.
                 </span>
               </div>
-            </>
+            </div>
           ) : (
             <Callout tone="info" title="Elige un ambiente">
               Verás los repositorios implicados y cuáles son comunes a varios
