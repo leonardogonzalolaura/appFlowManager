@@ -35,6 +35,7 @@ export function SettingsView({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [baseBranch, setBaseBranch] = useState('');
   const [manualPrefix, setManualPrefix] = useState('');
+  const [mondaySubdomain, setMondaySubdomain] = useState('');
   const [gitUserName, setGitUserName] = useState('');
   const [gitUserEmail, setGitUserEmail] = useState('');
 
@@ -46,6 +47,7 @@ export function SettingsView({
         setSettings(loaded);
         setBaseBranch(loaded.baseBranch);
         setManualPrefix(loaded.manualKeyPrefix);
+        setMondaySubdomain(loaded.mondaySubdomain);
         setGitUserName(loaded.gitUserName);
         setGitUserEmail(loaded.gitUserEmail);
       })
@@ -64,12 +66,14 @@ export function SettingsView({
       const updated = await updateSettings({
         baseBranch: baseBranch.trim(),
         manualKeyPrefix: manualPrefix.trim(),
+        mondaySubdomain: mondaySubdomain.trim(),
         gitUserName: gitUserName.trim(),
         gitUserEmail: gitUserEmail.trim(),
       });
       setSettings(updated);
       setBaseBranch(updated.baseBranch);
       setManualPrefix(updated.manualKeyPrefix);
+      setMondaySubdomain(updated.mondaySubdomain);
       setGitUserName(updated.gitUserName);
       setGitUserEmail(updated.gitUserEmail);
       toast.success('Preferencias guardadas');
@@ -291,6 +295,24 @@ export function SettingsView({
               <small className="field-hint">
                 Genera claves como {manualPrefix.trim() || 'MAN'}-0001. Letras y
                 números, entre 2 y 10 caracteres.
+              </small>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="settings-monday-subdomain">
+                Subdominio de Monday
+              </label>
+              <input
+                id="settings-monday-subdomain"
+                className="input"
+                value={mondaySubdomain}
+                onChange={(event) => setMondaySubdomain(event.target.value)}
+                placeholder="belcorp"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <small className="field-hint">
+                Se usa para abrir el ítem desde el grid:{' '}
+                https://{mondaySubdomain.trim() || 'belcorp'}.monday.com/item/BPIM-200
               </small>
             </div>
             <div className="field preference-identity">

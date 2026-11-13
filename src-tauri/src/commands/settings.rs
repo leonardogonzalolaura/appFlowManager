@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub base_branch: String,
     /// Prefijo de las claves de requerimientos manuales (MAN → MAN-0001).
     pub manual_key_prefix: String,
+    /// Subdominio de la cuenta de Monday (belcorp → belcorp.monday.com).
+    pub monday_subdomain: String,
     /// Identidad aplicada a los commits que crea FlowManager. Vacío = usar Git.
     pub git_user_name: String,
     pub git_user_email: String,
@@ -25,6 +27,7 @@ pub struct AppSettings {
 pub struct SettingsUpdateInput {
     pub base_branch: Option<String>,
     pub manual_key_prefix: Option<String>,
+    pub monday_subdomain: Option<String>,
     pub git_user_name: Option<String>,
     pub git_user_email: Option<String>,
 }
@@ -60,6 +63,11 @@ pub async fn settings_update(
         None => current.manual_key_prefix.clone(),
     };
 
+    let monday_subdomain = match input.monday_subdomain {
+        Some(value) => normalize_monday_subdomain(&value)?,
+        None => current.monday_subdomain.clone(),
+    };
+
     let git_user_name = match input.git_user_name {
         Some(value) => value.trim().to_string(),
         None => current.git_user_name.clone(),
@@ -72,6 +80,7 @@ pub async fn settings_update(
 
     upsert(pool, "base_branch", &base_branch).await?;
     upsert(pool, "manual_key_prefix", &manual_key_prefix).await?;
+    upsert(pool, "monday_subdomain", &monday_subdomain).await?;
     upsert(pool, "git_user_name", &git_user_name).await?;
     upsert(pool, "git_user_email", &git_user_email).await?;
     apply_git_identity(&git_user_name, &git_user_email);
@@ -134,6 +143,34 @@ fn normalize_prefix(value: &str) -> Result<String, AppError> {
     Ok(prefix)
 }
 
+/// Acepta tanto `belcorp` como `https://belcorp.monday.com` y devuelve el
+/// subdominio normalizado.
+fn normalize_monday_subdomain(value: &str) -> Result<String, AppError> {
+    let mut candidate = value.trim().to_lowercase();
+    candidate = candidate.trim_end_matches('/').to_string();
+    if let Some(rest) = candidate.strip_prefix("https://") {
+        candidate = rest.to_string();
+    } else if let Some(rest) = candidate.strip_prefix("http://") {
+        candidate = rest.to_string();
+    }
+    if let Some(rest) = candidate.strip_suffix(".monday.com") {
+        candidate = rest.to_string();
+    }
+    let subdomain = candidate;
+    let valid = (1..=63).contains(&subdomain.len())
+        && !subdomain.starts_with('-')
+        && !subdomain.ends_with('-')
+        && subdomain
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !valid {
+        return Err(AppError::Validation(
+            "El subdominio de Monday debe tener entre 1 y 63 caracteres (a-z, 0-9, guiones). Ejemplo: belcorp.".into(),
+        ));
+    }
+    Ok(subdomain)
+}
+
 async fn upsert(pool: &SqlitePool, key: &str, value: &str) -> Result<(), AppError> {
     sqlx::query(
         "INSERT INTO app_settings (key, value, updated_at)
@@ -150,12 +187,14 @@ async fn upsert(pool: &SqlitePool, key: &str, value: &str) -> Result<(), AppErro
 pub async fn read_settings(pool: &SqlitePool) -> Result<AppSettings, AppError> {
     let base_branch = setting(pool, "base_branch", "master").await?;
     let manual_key_prefix = setting(pool, "manual_key_prefix", "MAN").await?;
+    let monday_subdomain = setting(pool, "monday_subdomain", "belcorp").await?;
     let git_user_name = setting(pool, "git_user_name", "").await?;
     let git_user_email = setting(pool, "git_user_email", "").await?;
     let detected = git_cli::detect_global_identity();
     Ok(AppSettings {
         base_branch,
         manual_key_prefix,
+        monday_subdomain,
         git_user_name,
         git_user_email,
         git_config_user_name: detected.as_ref().map(|identity| identity.name.clone()),
@@ -175,6 +214,31 @@ async fn setting(pool: &SqlitePool, key: &str, fallback: &str) -> Result<String,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monday_subdomain_accepts_plain_and_url() {
+        assert_eq!(
+            normalize_monday_subdomain("belcorp").expect("plain"),
+            "belcorp"
+        );
+        assert_eq!(
+            normalize_monday_subdomain(" https://Belcorp.monday.com/ ").expect("url"),
+            "belcorp"
+        );
+        assert_eq!(
+            normalize_monday_subdomain("mi-cuenta").expect("hyphen"),
+            "mi-cuenta"
+        );
+    }
+
+    #[test]
+    fn monday_subdomain_rejects_invalid_values() {
+        assert!(normalize_monday_subdomain("").is_err());
+        assert!(normalize_monday_subdomain("con espacio").is_err());
+        assert!(normalize_monday_subdomain("-inicio").is_err());
+        assert!(normalize_monday_subdomain("final-").is_err());
+        assert!(normalize_monday_subdomain("belcorp.com").is_err());
+    }
 
     #[test]
     fn prefix_requires_letter_and_length() {

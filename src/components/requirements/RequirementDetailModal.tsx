@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { normalizeError } from '../../lib/api';
 import { listDbScripts } from '../../lib/database';
+import { openExternalUrl } from '../../lib/external';
 import { formatDateTime } from '../../lib/format';
+import { mondayItemUrl } from '../../lib/monday';
 import { getEnvironmentStatus } from '../../lib/presence';
 import {
   getRequirement,
@@ -32,6 +34,7 @@ import {
 
 interface RequirementDetailModalProps {
   requirementId: string;
+  mondaySubdomain: string;
   onClose: () => void;
   onChanged: () => void;
   onEdit: (requirement: RequirementDetail) => void;
@@ -44,6 +47,7 @@ const TAB_PREFIX = 'req-detail';
 
 export function RequirementDetailModal({
   requirementId,
+  mondaySubdomain,
   onClose,
   onChanged,
   onEdit,
@@ -239,6 +243,21 @@ export function RequirementDetailModal({
       onClose={onClose}
       footer={
         <>
+          {detail?.source === 'monday' ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() =>
+                void openExternalUrl(
+                  mondayItemUrl(detail.externalKey, mondaySubdomain),
+                  'msedge',
+                )
+              }
+            >
+              <Icon name="external" size={14} />
+              Abrir en Monday
+            </button>
+          ) : null}
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cerrar
           </button>

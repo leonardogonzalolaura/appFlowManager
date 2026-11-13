@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeError } from '../lib/api';
+import { openExternalUrl } from '../lib/external';
 import { formatDateTime, withAlpha } from '../lib/format';
+import { mondayItemUrl } from '../lib/monday';
 import {
   archiveManualRequirement,
   getRequirementFacets,
   listRequirements,
 } from '../lib/requirements';
+import { getSettings } from '../lib/settings';
 import { listSquashSessions, abortSquash } from '../lib/squash';
 import type {
   ApiError,
@@ -95,6 +98,7 @@ export function RequirementsView() {
   const [deployInitialSessions, setDeployInitialSessions] =
     useState<SquashSession[]>([]);
   const [featurePickerOpen, setFeaturePickerOpen] = useState(false);
+  const [mondaySubdomain, setMondaySubdomain] = useState('belcorp');
 
   const [deploymentToCancel, setDeploymentToCancel] = useState<
     SquashSession[] | null
@@ -104,6 +108,18 @@ export function RequirementsView() {
     null,
   );
   const [discardingSquash, setDiscardingSquash] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void getSettings()
+      .then((loaded) => {
+        if (active) setMondaySubdomain(loaded.mondaySubdomain || 'belcorp');
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -886,6 +902,7 @@ export function RequirementsView() {
                       onToggle={() => toggleSelected(item)}
                       onDeploy={() => openDeploymentFor(item)}
                       onOpen={() => setDetailId(item.id)}
+                      mondaySubdomain={mondaySubdomain}
                       onArchive={() =>
                         setArchiveTarget({
                           id: item.id,
@@ -1003,6 +1020,7 @@ export function RequirementsView() {
       {detailId ? (
         <RequirementDetailModal
           requirementId={detailId}
+          mondaySubdomain={mondaySubdomain}
           onClose={() => setDetailId(null)}
           onChanged={() => void refreshAll()}
           onEdit={(detail) => {
@@ -1078,6 +1096,7 @@ function RequirementRow({
   onDeploy,
   onOpen,
   onArchive,
+  mondaySubdomain,
 }: {
   item: RequirementListItem;
   selected: boolean;
@@ -1085,6 +1104,7 @@ function RequirementRow({
   onDeploy: () => void;
   onOpen: () => void;
   onArchive: () => void;
+  mondaySubdomain: string;
 }) {
   const [copied, setCopied] = useState(false);
   const deployable = !item.archivedAt && item.repoCount > 0;
@@ -1125,6 +1145,23 @@ function RequirementRow({
           >
             <Icon name={copied ? 'check' : 'copy'} size={12} />
           </button>
+          {item.source === 'monday' ? (
+            <button
+              type="button"
+              className="btn btn-icon btn-ghost btn-xs req-open-monday"
+              aria-label={`Abrir ${item.externalKey} en Monday`}
+              title="Abrir en Monday"
+              onClick={(e) => {
+                e.stopPropagation();
+                void openExternalUrl(
+                  mondayItemUrl(item.externalKey, mondaySubdomain),
+                  'msedge',
+                );
+              }}
+            >
+              <Icon name="external" size={12} />
+            </button>
+          ) : null}
         </span>
       </td>
       <td>

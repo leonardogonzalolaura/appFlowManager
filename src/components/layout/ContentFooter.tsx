@@ -49,9 +49,11 @@ export function ContentFooter({ info }: ContentFooterProps) {
             void openAppsSite();
           }}
         >
-          Más apps y recursos
+          Más apps en atechlo-app.site
           <Icon name="external" size={11} />
         </a>
+        <span className="content-footer-sep">·</span>
+        <span>© {new Date().getFullYear()} Atechlo</span>
       </div>
     </footer>
   );

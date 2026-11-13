@@ -262,6 +262,19 @@ tr:hover .req-copy-key,
   color: var(--color-success, #3dd68c);
 }
 
+.req-open-monday {
+  color: var(--text-muted);
+  opacity: 0.7;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+tr:hover .req-open-monday,
+.req-open-monday:hover,
+.req-open-monday:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+}
+
 .req-title {
   display: block;
   max-width: 450px;

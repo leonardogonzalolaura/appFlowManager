@@ -19,6 +19,10 @@
           "app": "msedge"
         },
         {
+          "url": "https://*.monday.com/*",
+          "app": "msedge"
+        },
+        {
           "url": "https://www.atechlo-app.site/*"
         }
       ]

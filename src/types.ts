@@ -459,6 +459,7 @@ export interface RequirementPresence {
 export interface AppSettings {
   baseBranch: string;
   manualKeyPrefix: string;
+  mondaySubdomain: string;
   gitUserName: string;
   gitUserEmail: string;
   gitConfigUserName: string | null;

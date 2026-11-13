@@ -5,6 +5,7 @@ import type { AppSettings } from '../types';
 const DEMO_SETTINGS: AppSettings = {
   baseBranch: 'master',
   manualKeyPrefix: 'MAN',
+  mondaySubdomain: 'belcorp',
   gitUserName: '',
   gitUserEmail: '',
   gitConfigUserName: null,
@@ -19,6 +20,7 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(input: {
   baseBranch?: string;
   manualKeyPrefix?: string;
+  mondaySubdomain?: string;
   gitUserName?: string;
   gitUserEmail?: string;
 }): Promise<AppSettings> {
@@ -27,6 +29,7 @@ export async function updateSettings(input: {
       ...DEMO_SETTINGS,
       baseBranch: input.baseBranch ?? DEMO_SETTINGS.baseBranch,
       manualKeyPrefix: input.manualKeyPrefix ?? DEMO_SETTINGS.manualKeyPrefix,
+      mondaySubdomain: input.mondaySubdomain ?? DEMO_SETTINGS.mondaySubdomain,
       gitUserName: input.gitUserName ?? DEMO_SETTINGS.gitUserName,
       gitUserEmail: input.gitUserEmail ?? DEMO_SETTINGS.gitUserEmail,
     };
