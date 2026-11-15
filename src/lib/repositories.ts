@@ -108,6 +108,14 @@ export async function openRepositoryFolder(
   return invoke<string>('repositories_open_folder', { repositoryId });
 }
 
+export async function openRepositoryInTaruGit(
+  repositoryId: string,
+  branchName?: string,
+): Promise<void> {
+  requireDesktop();
+  return invoke<void>('repositories_open_tarugit', { repositoryId, branchName });
+}
+
 export async function listEnvironments(): Promise<EnvironmentDefinition[]> {
   if (!isTauri()) {
     return demoEnvironments();

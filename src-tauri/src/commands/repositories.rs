@@ -980,6 +980,118 @@ pub async fn repositories_open_folder(
     Ok(row.local_path)
 }
 
+#[tauri::command]
+pub async fn repositories_open_tarugit(
+    state: State<'_, AppState>,
+    repository_id: String,
+    branch_name: Option<String>,
+) -> Result<(), ApiError> {
+    use std::process::Command;
+    use std::time::Duration;
+
+    let pool = state.pool()?;
+    let row = load_repository(pool, &repository_id).await?;
+    let repo_path = Path::new(&row.local_path);
+    if !repo_path.exists() {
+        return Err(AppError::Validation(format!(
+            "La ruta del repositorio no existe: {}",
+            row.local_path
+        ))
+        .into());
+    }
+
+    let path_to_open = if let Some(branch) = branch_name.filter(|b| !b.trim().is_empty()) {
+        // Intentar crear un worktree temporal para la rama y abrirlo en TaruGit.
+        // Si la rama no existe localmente, se abre el repositorio base.
+        let snapshot = match git_reader::read_snapshot(repo_path) {
+            Ok(s) => s,
+            Err(_) => {
+                // Fallback a la ruta base si no se puede leer el repositorio.
+                repo_path.to_path_buf()
+            }
+        };
+
+        let branch_exists = snapshot.branches.iter().any(|b| b.name.eq_ignore_ascii_case(&branch));
+        if !branch_exists {
+            // Rama no encontrada, abrir el repositorio directamente.
+            repo_path.to_path_buf()
+        } else {
+            let sanitized = branch.replace('/', "__").replace('\\', "__");
+            let worktrees_dir = &state.paths.worktrees_dir;
+            let worktree_path = worktrees_dir
+                .join(&row.id)
+                .join(format!("tarugit-{}", sanitized));
+            if let Some(parent) = worktree_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    AppError::GitFailed(format!("No se pudo crear carpeta de worktree: {e}"))
+                })?;
+            }
+            if !worktree_path.exists() {
+                // git worktree add <path> <branch>
+                let run = git_cli::run_git(
+                    Some(repo_path),
+                    &[
+                        "worktree".to_string(),
+                        "add".to_string(),
+                        worktree_path.to_string_lossy().to_string(),
+                        branch.clone(),
+                    ],
+                    Duration::from_secs(120),
+                )
+                .map_err(|e| AppError::GitFailed(e.to_string()))?;
+                if !run.success {
+                    // Si falla la creación, abrir el repositorio base.
+                    repo_path.to_path_buf()
+                } else {
+                    worktree_path
+                }
+            } else {
+                worktree_path
+            }
+        }
+    } else {
+        repo_path.to_path_buf()
+    };
+
+    let executable = tarugit_executable().ok_or_else(|| {
+        AppError::Validation(
+            "No se encontró TaruGit. Instálalo en %LOCALAPPDATA%\\tarugit\\tarugit.exe o define la variable TARUGIT_PATH.".into(),
+        )
+    })?;
+
+    Command::new(&executable)
+        .arg("--open")
+        .arg(&path_to_open)
+        .arg("--temporary")
+        .spawn()
+        .map_err(|e| {
+            AppError::Validation(format!(
+                "No se pudo abrir TaruGit ({}): {e}",
+                executable.display()
+            ))
+        })?;
+
+    Ok(())
+}
+
+fn tarugit_executable() -> Option<std::path::PathBuf> {
+    if let Some(value) = std::env::var_os("TARUGIT_PATH") {
+        let path = std::path::PathBuf::from(value);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let path = std::path::PathBuf::from(local_app_data)
+            .join("tarugit")
+            .join("tarugit.exe");
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 // ─── Lógica de alta ─────────────────────────────────────────────────────────
 
 async fn add_from_path(

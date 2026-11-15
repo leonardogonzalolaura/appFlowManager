@@ -77,6 +77,7 @@ pub fn run() {
             commands::repositories::repositories_set_environment,
             commands::repositories::repositories_list_branches,
             commands::repositories::repositories_open_folder,
+            commands::repositories::repositories_open_tarugit,
             commands::repositories::environments_list,
             commands::repositories::environments_create,
             commands::repositories::environments_update,

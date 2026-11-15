@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { normalizeError } from '../../lib/api';
 import { analyzeRequirementBranches } from '../../lib/branches';
 import { formatDateTime } from '../../lib/format';
+import { openRepositoryInTaruGit } from '../../lib/repositories';
 import { unassignRequirementRepository } from '../../lib/requirements';
 import type {
   BranchOperationResult,
@@ -83,6 +84,16 @@ export function RequirementRepositoriesTab({
       });
     } finally {
       setAnalyzingRepo(null);
+    }
+  }
+
+  async function handleOpenTaruGit(repository: RequirementRepositoryMapping) {
+    try {
+      await openRepositoryInTaruGit(repository.repositoryId, repository.branchName);
+      toast.success('TaruGit abierto', { description: repository.name });
+    } catch (caught) {
+      const apiError = normalizeError(caught);
+      toast.error('No se pudo abrir TaruGit', { description: apiError.message });
     }
   }
 
@@ -170,7 +181,14 @@ export function RequirementRepositoriesTab({
                           : ''}
                       </small>
                     </span>
-                    <code className="branch-name">{repository.branchName}</code>
+                    <button
+                      type="button"
+                      className="branch-name"
+                      title="Abrir en TaruGit"
+                      onClick={() => void handleOpenTaruGit(repository)}
+                    >
+                      {repository.branchName}
+                    </button>
                     <StatusChip tone={branchStatusTone(repository.branchStatus)}>
                       {branchStatusLabel(repository.branchStatus)}
                     </StatusChip>
