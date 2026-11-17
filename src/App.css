@@ -1768,6 +1768,41 @@ code {
   color: var(--text-secondary);
 }
 
+.confirm-details {
+  margin-top: 12px;
+}
+
+.remote-branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-branch-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.remote-branch-repo {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.remote-branch-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
 /* ==========================================================================
    Guide
    ========================================================================== */

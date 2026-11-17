@@ -91,6 +91,15 @@ export async function cleanupDeployment(
   });
 }
 
+export async function deleteRemoteDeployBranches(
+  sessionIds: string[],
+): Promise<{ results: Array<{ sessionId: string; repositoryId: string; repositoryName: string; branch: string; success: boolean; error?: string }> }> {
+  requireDesktop();
+  return invoke<{ results: Array<{ sessionId: string; repositoryId: string; repositoryName: string; branch: string; success: boolean; error?: string }> }>('deployment_delete_remote_branches', {
+    input: { sessionIds },
+  });
+}
+
 export async function listDeploymentBatches(): Promise<DeploymentBatchSummary[]> {
   requireDesktop();
   return invoke<DeploymentBatchSummary[]>('deployment_batches_list');

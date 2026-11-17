@@ -1003,50 +1003,50 @@ pub async fn repositories_open_tarugit(
     let path_to_open = if let Some(branch) = branch_name.filter(|b| !b.trim().is_empty()) {
         // Intentar crear un worktree temporal para la rama y abrirlo en TaruGit.
         // Si la rama no existe localmente, se abre el repositorio base.
-        let snapshot = match git_reader::read_snapshot(repo_path) {
-            Ok(s) => s,
+        match git_reader::read_snapshot(repo_path) {
+            Ok(snapshot) => {
+                let branch_exists = snapshot.branches.iter().any(|b| b.name.eq_ignore_ascii_case(&branch));
+                if !branch_exists {
+                    // Rama no encontrada, abrir el repositorio directamente.
+                    repo_path.to_path_buf()
+                } else {
+                    let sanitized = branch.replace('/', "__").replace('\\', "__");
+                    let worktrees_dir = &state.paths.worktrees_dir;
+                    let worktree_path = worktrees_dir
+                        .join(&row.id)
+                        .join(format!("tarugit-{}", sanitized));
+                    if let Some(parent) = worktree_path.parent() {
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            AppError::GitFailed(format!("No se pudo crear carpeta de worktree: {e}"))
+                        })?;
+                    }
+                    if !worktree_path.exists() {
+                        // git worktree add <path> <branch>
+                        let run = git_cli::run_git(
+                            Some(repo_path),
+                            &[
+                                "worktree".to_string(),
+                                "add".to_string(),
+                                worktree_path.to_string_lossy().to_string(),
+                                branch.clone(),
+                            ],
+                            Duration::from_secs(120),
+                        )
+                        .map_err(|e| AppError::GitFailed(e.to_string()))?;
+                        if !run.success {
+                            // Si falla la creación, abrir el repositorio base.
+                            repo_path.to_path_buf()
+                        } else {
+                            worktree_path
+                        }
+                    } else {
+                        worktree_path
+                    }
+                }
+            }
             Err(_) => {
                 // Fallback a la ruta base si no se puede leer el repositorio.
                 repo_path.to_path_buf()
-            }
-        };
-
-        let branch_exists = snapshot.branches.iter().any(|b| b.name.eq_ignore_ascii_case(&branch));
-        if !branch_exists {
-            // Rama no encontrada, abrir el repositorio directamente.
-            repo_path.to_path_buf()
-        } else {
-            let sanitized = branch.replace('/', "__").replace('\\', "__");
-            let worktrees_dir = &state.paths.worktrees_dir;
-            let worktree_path = worktrees_dir
-                .join(&row.id)
-                .join(format!("tarugit-{}", sanitized));
-            if let Some(parent) = worktree_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    AppError::GitFailed(format!("No se pudo crear carpeta de worktree: {e}"))
-                })?;
-            }
-            if !worktree_path.exists() {
-                // git worktree add <path> <branch>
-                let run = git_cli::run_git(
-                    Some(repo_path),
-                    &[
-                        "worktree".to_string(),
-                        "add".to_string(),
-                        worktree_path.to_string_lossy().to_string(),
-                        branch.clone(),
-                    ],
-                    Duration::from_secs(120),
-                )
-                .map_err(|e| AppError::GitFailed(e.to_string()))?;
-                if !run.success {
-                    // Si falla la creación, abrir el repositorio base.
-                    repo_path.to_path_buf()
-                } else {
-                    worktree_path
-                }
-            } else {
-                worktree_path
             }
         }
     } else {

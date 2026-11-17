@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
 import { Spinner } from './Spinner';
@@ -9,6 +10,7 @@ interface ConfirmModalProps {
   cancelLabel?: string;
   tone?: 'primary' | 'danger';
   busy?: boolean;
+  children?: ReactNode;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -20,6 +22,7 @@ export function ConfirmModal({
   cancelLabel = 'Cancelar',
   tone = 'primary',
   busy = false,
+  children,
   onConfirm,
   onClose,
 }: ConfirmModalProps) {
@@ -57,6 +60,7 @@ export function ConfirmModal({
       }
     >
       <p className="confirm-message">{message}</p>
+      {children ? <div className="confirm-details">{children}</div> : null}
     </Modal>
   );
 }

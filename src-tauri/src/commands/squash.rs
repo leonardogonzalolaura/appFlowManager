@@ -1614,6 +1614,29 @@ pub struct DeploymentCleanupResult {
     pub failed_branches: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentDeleteRemoteBranchesInput {
+    pub session_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentDeleteRemoteBranchResult {
+    pub session_id: String,
+    pub repository_id: String,
+    pub repository_name: String,
+    pub branch: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentDeleteRemoteBranchesResult {
+    pub results: Vec<DeploymentDeleteRemoteBranchResult>,
+}
+
 /// Limpia los artefactos locales de un despliegue ya empujado: worktrees y
 /// ramas hijas locales. No toca el remoto, el ambiente ni el estado de la
 /// sesión; un despliegue empujado sigue completado, no cancelado.
@@ -1624,6 +1647,16 @@ pub async fn deployment_cleanup(
 ) -> Result<DeploymentCleanupResult, ApiError> {
     let pool = state.pool()?;
     cleanup_deployment_sessions(pool, &input.session_ids).await
+}
+
+#[tauri::command]
+pub async fn deployment_delete_remote_branches(
+    state: State<'_, AppState>,
+    input: DeploymentDeleteRemoteBranchesInput,
+) -> Result<DeploymentDeleteRemoteBranchesResult, ApiError> {
+    let pool = state.pool()?;
+    let result = delete_remote_branches(pool, &input.session_ids).await?;
+    Ok(result)
 }
 
 async fn cleanup_deployment_sessions(
@@ -1661,6 +1694,79 @@ async fn cleanup_deployment_sessions(
         cleaned_branches,
         failed_branches,
     })
+}
+
+async fn delete_remote_branches(
+    pool: &SqlitePool,
+    session_ids: &[String],
+) -> Result<DeploymentDeleteRemoteBranchesResult, AppError> {
+    use crate::domain::deployment;
+    use std::time::Duration;
+
+    let mut results = Vec::new();
+
+    for session_id in session_ids {
+        let session = load_session(pool, session_id).await?;
+        let repo = load_repo(pool, &session.repository_id).await?;
+
+        let branch = match session.deploy_branch.as_deref() {
+            Some(b) if !b.trim().is_empty() => b.to_string(),
+            _ => {
+                results.push(DeploymentDeleteRemoteBranchResult {
+                    session_id: session.id.clone(),
+                    repository_id: repo.id.clone(),
+                    repository_name: session.repository_name.clone(),
+                    branch: String::new(),
+                    success: false,
+                    error: Some("La sesión no tiene rama de despliegue".into()),
+                });
+                continue;
+            }
+        };
+
+        if deployment::is_protected_branch(&branch) {
+            results.push(DeploymentDeleteRemoteBranchResult {
+                session_id: session.id.clone(),
+                repository_id: repo.id.clone(),
+                repository_name: session.repository_name.clone(),
+                branch: branch.clone(),
+                success: false,
+                error: Some("Rama protegida, no se elimina".into()),
+            });
+            continue;
+        }
+
+        let repo_path = Path::new(&repo.local_path);
+        let remote = &repo.remote_name;
+        let run = git_cli::run_git(
+            Some(repo_path),
+            &[
+                "push".to_string(),
+                remote.clone(),
+                "--delete".to_string(),
+                branch.clone(),
+            ],
+            Duration::from_secs(120),
+        )?;
+
+        let success = run.success;
+        let error = if success {
+            None
+        } else {
+            Some(run.stderr.trim().to_string())
+        };
+
+        results.push(DeploymentDeleteRemoteBranchResult {
+            session_id: session.id.clone(),
+            repository_id: repo.id.clone(),
+            repository_name: session.repository_name.clone(),
+            branch,
+            success,
+            error,
+        });
+    }
+
+    Ok(DeploymentDeleteRemoteBranchesResult { results })
 }
 
 /// Elimina el worktree, la rama interna y la rama hija local de una sesión.

@@ -5,6 +5,7 @@ import { copyText, formatDateTime, shortSha, truncateMiddle, withAlpha } from '.
 import {
   applyDeployment,
   cleanupDeployment,
+  deleteRemoteDeployBranches,
   getDeploymentReport,
   loadDeploymentCommits,
   prepareDeployment,
@@ -81,6 +82,8 @@ export function DeploymentWizardModal({
   const [cancelling, setCancelling] = useState(false);
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [confirmDeleteRemote, setConfirmDeleteRemote] = useState(false);
+  const [deletingRemote, setDeletingRemote] = useState(false);
   const [branchConflict, setBranchConflict] = useState<{
     session: SquashSession;
     branch: string;
@@ -713,6 +716,38 @@ export function DeploymentWizardModal({
     }
   }
 
+  async function handleDeleteRemoteBranches(
+    sessionIds: string[] = sessions.filter(s => s.deployBranch && s.pushedSha).map(s => s.id),
+  ) {
+    if (sessionIds.length === 0) {
+      toast.info('No hay ramas remotas para eliminar');
+      return;
+    }
+    setDeletingRemote(true);
+    try {
+      const result = await deleteRemoteDeployBranches(sessionIds);
+      setConfirmDeleteRemote(false);
+      onChanged();
+      const successes = result.results.filter(r => r.success).length;
+      const failures = result.results.filter(r => !r.success);
+      if (failures.length > 0) {
+        toast.warning(`Se eliminaron ${successes} rama(s) remota(s), ${failures.length} fallaron`, {
+          description: failures.map(f => `${f.repositoryName}/${f.branch}: ${f.error ?? 'desconocido'}`).join('; '),
+        });
+      } else {
+        toast.success(`${successes} rama(s) remota(s) eliminada(s)`, {
+          description: 'Las ramas hijas ya no existen en GitHub.',
+        });
+      }
+    } catch (caught) {
+      toast.error('No se pudieron eliminar ramas remotas', {
+        description: normalizeError(caught).message,
+      });
+    } finally {
+      setDeletingRemote(false);
+    }
+  }
+
   const environmentLabel =
     preview?.environmentLabel ??
     environments.find((item) => item.key === environment)?.label ??
@@ -807,19 +842,34 @@ export function DeploymentWizardModal({
         ) : (
           <>
             {completedDeployment ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setConfirmCleanup(true)}
-                disabled={cleaning || Object.keys(busy).length > 0}
-              >
-                {cleaning ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <Icon name="trash" size={14} />
-                )}
-                {cleaning ? 'Limpiando…' : 'Limpiar ramas locales'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmCleanup(true)}
+                  disabled={cleaning || Object.keys(busy).length > 0}
+                >
+                  {cleaning ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <Icon name="trash" size={14} />
+                  )}
+                  {cleaning ? 'Limpiando…' : 'Limpiar ramas locales'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setConfirmDeleteRemote(true)}
+                  disabled={deletingRemote || Object.keys(busy).length > 0 || !sessions.some(s => s.deployBranch && s.pushedSha)}
+                >
+                  {deletingRemote ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <Icon name="trash" size={14} />
+                  )}
+                  Eliminar ramas remotas
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -1370,6 +1420,29 @@ export function DeploymentWizardModal({
               onConfirm={() => void cleanDeployment()}
               onClose={() => setConfirmCleanup(false)}
             />
+          ) : null}
+
+          {confirmDeleteRemote ? (
+            <ConfirmModal
+              title="Eliminar ramas remotas"
+              message="Se eliminarán las siguientes ramas hijas del remoto. Las ramas del ambiente no se tocan."
+              confirmLabel="Eliminar ramas"
+              tone="danger"
+              busy={deletingRemote}
+              onConfirm={() => void handleDeleteRemoteBranches()}
+              onClose={() => setConfirmDeleteRemote(false)}
+            >
+              <ul className="remote-branch-list">
+                {sessions
+                  .filter(s => s.deployBranch && s.pushedSha)
+                  .map(session => (
+                    <li key={session.id} className="remote-branch-item">
+                      <span className="remote-branch-repo">{session.repositoryName}</span>
+                      <code className="remote-branch-name">{session.deployBranch}</code>
+                    </li>
+                  ))}
+              </ul>
+            </ConfirmModal>
           ) : null}
         </div>
       )}
